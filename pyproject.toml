@@ -1,0 +1,65 @@
+
+[tool.poetry]
+name = "webcrypt"
+version = "0.8.0"
+description = "High level Constructs for Web App cryptography and JOSE spec implementation"
+license = "Apache-2.0"
+authors = ["mk <mk@plataux.com>"]
+maintainers = []
+readme = "README.md"
+homepage = "https://plataux.com"
+repository = "https://github.com/plataux/webcrypt"
+documentation = ""
+keywords = ["cryptography", "security"]
+classifiers = [
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent"
+]
+packages = [
+    { include = "webcrypt", from = "src" },
+]
+
+
+[tool.poetry.dependencies]
+python = "^3.8"
+pydantic = "^1.9"
+cryptography = "^37.0"
+
+[tool.poetry.dev-dependencies]
+flake8 = "^4.0"
+tox = "^3.24"
+pytest = "^6.2"
+pytest-cov = "^3.0"
+mypy = "^0.910"
+sphinx = "^4.2"
+sphinx-rtd-theme = "^1.0"
+recommonmark = "^0.7"
+
+
+[tool.mypy]
+mypy_path = "src"
+check_untyped_defs = true
+disallow_any_generics = true
+ignore_missing_imports = true
+no_implicit_optional = true
+show_error_codes = true
+strict_equality = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_configs = true
+no_implicit_reexport = true
+
+
+[build-system]
+requires = ["setuptools>=42.0","wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+addopts = "--cov=webcrypt"
+testpaths = [
+    "tests",
+]
