@@ -1,5 +1,14 @@
 """
-The AES and RSA Ops Module
+Generate RSA keys, export and import RSA keys to and from several formats, and use them
+to sign and verify messages, and encrypt and decrypt small messages.
+
+AES Key Generation, export and import from multiple formats,
+encryption of byte and unicode data, and high level functions to encrypt and decrypt unicode
+strings and json-serializable python dicts
+
+Several High level Hybrid Encryption and Decryption functions that combine RSA PKI with AES
+session Keys.
+
 """
 
 from Cryptodome.Cipher import AES, PKCS1_OAEP
@@ -40,20 +49,45 @@ _pctx = CryptContext(schemes=[
 
 class RSAKeyPair:
     """
-    Stores the private Key in PKCS#8 format (PrivateKeyInfo), which is optional
-    Stores the public Key in ASN.1 DER forman (SubjectPublicKeyInfo)
+    Stores the public Key in ASN.1 DER format (SubjectPublicKeyInfo).
+
+    Stores the private Key in PKCS#8 format (PrivateKeyInfo), which is optional.
+
+    The reason Private Keys are optional is because most client applications will be dealing with
+    with different hosts/clients public keys/certificates
+    to encrypt messages, and verify signatures.
     """
 
     def __init__(self, pubkey: str, privkey: Optional[str]):
+        """
+        initialize RSAKeyPair with an existing Public key in PEM format, and optionally
+        a Private key in PEM PKCS#8 format
+        :param pubkey:  pubkey string
+        :param privkey:  Optional privket string
+        """
         self.pubkey: str = pubkey
         self.privkey: Optional[str] = privkey
 
-    def keysize(self):
+    def keysize(self) -> int:
+        """
+        Calculate the RSA bit-size from the public key of this class
+
+        :return: RSA keysize in bits (1024, 2048, 3072 or 4096 bits)
+        """
         return RSA.import_key(self.pubkey).size_in_bits()
 
     def export_pem_files(self, directory,
+                         pubkey_name='pubkey.pem',
                          privkey_name='privkey.pem',
-                         pubkey_name='pubkey.pem'):
+                         ):
+        """
+        export the public key, and optionally the private key if available
+
+        :param directory:
+        :param pubkey_name: pubkey.pem by default
+        :param privkey_name: privkey.pem by default, if available
+        :return:
+        """
         if directory == '' or directory is None:
             directory = './pemkeys'
         os.makedirs(f'{directory}', mode=0o755, exist_ok=True)
@@ -69,6 +103,14 @@ class RSAKeyPair:
     def import_pem_files(cls, directory,
                          privkey_name='privkey.pem',
                          pubkey_name='pubkey.pem') -> "RSAKeyPair":
+        """
+        import the public key, and optionally the private key if available
+
+        :param directory:
+        :param pubkey_name: pubkey.pem by default
+        :param privkey_name: privkey.pem by default, if available
+        :return:
+        """
         pubkey_path = f'{directory}/{pubkey_name}'
         privkey_path = f'{directory}/{privkey_name}'
 

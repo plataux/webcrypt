@@ -163,8 +163,10 @@ def jwt_verify_signature(token_encoded: str,
     """
     verifies the signature of an encoded token, and decodes it anyway.
     Doesn't verify any claims, just the signature VS the token content
-    Returns:
-        a Tuple of a bool, and decoded token str
+
+    :param token_encoded:
+    :param pubkey:
+    :return:
     """
     try:
         dt = jws.verify(token_encoded, pubkey, algorithms='RS256', verify=True)
