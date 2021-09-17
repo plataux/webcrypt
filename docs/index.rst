@@ -11,10 +11,10 @@ Highlevel APIs for Web App cryptography, security and password management
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Contents
 
-   docroot/keys.rst
-   docroot/jwx.rst
+   contents/keys.rst
+   contents/jwx.rst
 
 
 Indices and tables
