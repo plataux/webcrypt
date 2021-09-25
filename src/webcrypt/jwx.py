@@ -75,8 +75,8 @@ class Token(BaseModel):
     #  If present, it MUST contain the OAuth 2.0 Client ID of this party.
     azp: Optional[str]
 
-    # Private Claims
-    pclaims: Optional[Dict[Any, Any]]
+    # Extra Claims
+    eclaims: Optional[Dict[Any, Any]]
 
 
 class JWTOptions(BaseModel):
@@ -132,12 +132,15 @@ def jwt_create(issuer=None,
     return tk
 
 
-def jwt_encode(token: Token, privkey: Union[str, bytes, Dict[str, str]],
+def jwt_encode(token: Union[Token, Dict], privkey: Union[str, bytes, Dict[str, str]],
                access_token=None) -> str:
-    encoded_toke: str = jwt.encode(token.dict(exclude_unset=True), privkey,
-                                   algorithm='RS256',
-                                   access_token=access_token)
-    return encoded_toke
+    if isinstance(token, Token):
+        token = token.dict(exclude_unset=True)
+
+    encoded_token: str = jwt.encode(token, privkey,
+                                    algorithm='RS256',
+                                    access_token=access_token)
+    return encoded_token
 
 
 def jwt_decode(token_encoded: str, pubkey: Union[str, bytes, Dict[str, str]],
@@ -146,7 +149,7 @@ def jwt_decode(token_encoded: str, pubkey: Union[str, bytes, Dict[str, str]],
                audience=None,
                access_token=None,
                jwt_options=None
-               ) -> Token:
+               ) -> Dict:
     decoded_data = jwt.decode(token_encoded,
                               pubkey,
                               algorithms=['RS256'],
@@ -155,7 +158,7 @@ def jwt_decode(token_encoded: str, pubkey: Union[str, bytes, Dict[str, str]],
                               audience=audience,
                               access_token=access_token,
                               options=jwt_options)
-    return Token.parse_obj(decoded_data)
+    return decoded_data
 
 
 def jwt_verify_signature(token_encoded: str,
