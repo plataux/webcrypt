@@ -18,11 +18,11 @@ def test_token_workflow():
 
     tk_decoded = jwt_decode(tk_encoded, pubkey=kp.pubkey)
 
-    assert tk.json() == tk_decoded.json()
+    assert tk.dict() == Token.parse_obj(tk_decoded).dict()
 
     sleep(2)
     with pytest.raises(ExpiredSignatureError):
-        tk_decoded = jwt_decode(tk_encoded, pubkey=kp.pubkey)
+        jwt_decode(tk_encoded, pubkey=kp.pubkey)
 
 
 def test_token_jwe():
@@ -43,7 +43,7 @@ def test_token_jwe():
 
     id_decoded = jwt_decode(id_encoded, pubkey=kp.pubkey, access_token=access_encrypted)
 
-    id_dict = id_decoded.dict(exclude_unset=True)
+    id_dict = id_decoded
 
     assert "at_hash" in id_dict
 
@@ -51,11 +51,11 @@ def test_token_jwe():
 
     assert json.dumps(id_dict) == id_token.json(exclude_unset=True)
 
-    access_decrypted = jwe_decrypt(access_encrypted,kp.privkey)
+    access_decrypted = jwe_decrypt(access_encrypted, kp.privkey)
 
     assert access_decrypted == access_encoded
 
-    access_decoded = jwt_decode(access_decrypted, kp.pubkey)
+    assert jwt_decode(access_decrypted, kp.pubkey)
 
     sleep(2)
 
