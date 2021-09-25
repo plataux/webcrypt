@@ -197,6 +197,22 @@ class RSAKeyPair:
         kp.privkey = privkey
         return kp
 
+    def __str__(self) -> str:
+        return json.dumps({'pubkey': self.pubkey, 'privkey': self.privkey})
+
+    def __repr__(self):
+        return json.dumps(self.export_jwk(), indent=2)
+
+    @classmethod
+    def import_json(cls, rsa_jwk_json: str):
+        dx: Dict[str, Any] = json.loads(rsa_jwk_json)
+
+        if 'pubkey' in dx:
+            return cls.import_jwk(dx)
+
+        elif "kty" in dx and dx.get("kty") == "RSA":
+            return cls.import_jwk({'pubkey': dx})
+
 
 class AESKey:
     def __init__(self, keysize: Optional[int] = None):
