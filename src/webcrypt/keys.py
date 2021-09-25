@@ -58,15 +58,34 @@ class RSAKeyPair:
     to encrypt messages, and verify signatures.
     """
 
-    def __init__(self, pubkey: str, privkey: Optional[str]):
+    def __init__(self, keysize: Optional[int] = 2048):
         """
+
+        RSA Key types: 1024, 2048 and 3072, and 4096
+        Key size of 1024 can be used to sign and verify JWTs withAlgorithm RS256
+
+        * 1024 bit RSA
+        * 2048 bit RSA (recommended - most common)
+        * 3072 bit RSA
+        * 4096 bit RSA (none-standard)
+
         initialize RSAKeyPair with an existing Public key in PEM format, and optionally
         a Private key in PEM PKCS#8 format
-        :param pubkey:  pubkey string
-        :param privkey:  Optional privket string
+
+        :param keysize:  optional parameter keysize, generate new KeyPair when provided
+
         """
-        self.pubkey: str = pubkey
-        self.privkey: Optional[str] = privkey
+
+        if keysize is None:
+            return
+
+        if not isinstance(keysize, int) or keysize not in (1024, 2048, 3072, 4096):
+            raise ValueError('RSA keysize my be an int in (1024, 2048, 3072, 4096)')
+
+        key = RSA.generate(keysize)
+
+        self.pubkey: str = key.public_key().export_key().decode()
+        self.privkey: Optional[str] = key.export_key(pkcs=8).decode()
 
     def keysize(self) -> int:
         """
@@ -126,7 +145,10 @@ class RSAKeyPair:
             with open(privkey_path) as fx:
                 privkey = fx.read()
 
-        return cls(pubkey, privkey)
+        kp: "RSAKeyPair" = cls(None)
+        kp.pubkey = pubkey
+        kp.privkey = privkey
+        return kp
 
     def export_jwk(self) -> Dict[str, Dict[str, str]]:
         jx = {
@@ -146,7 +168,10 @@ class RSAKeyPair:
         else:
             privkey = None
 
-        return cls(pubkey, privkey)
+        kp: "RSAKeyPair" = cls(None)
+        kp.pubkey = pubkey
+        kp.privkey = privkey
+        return kp
 
     def export_rsa_objects(self: Any) -> Dict[str, RSA.RsaKey]:
         dx = {
@@ -167,7 +192,10 @@ class RSAKeyPair:
         else:
             privkey = None
 
-        return cls(pubkey, privkey)
+        kp: "RSAKeyPair" = cls(None)
+        kp.pubkey = pubkey
+        kp.privkey = privkey
+        return kp
 
 
 class AESKey:
@@ -247,13 +275,10 @@ def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
     :rtype: dict
     """
 
-    if not isinstance(keysize, int) or keysize not in (1024, 2048, 3072, 4096):
-        raise ValueError('RSA keysize my be an int in (1024, 2048, 3072, 4096)')
+    if not isinstance(keysize, int):
+        raise ValueError('RSA keysize is a mandatory int parameter')
 
-    key = RSA.generate(keysize)
-
-    return RSAKeyPair(key.public_key().export_key().decode(),
-                      key.export_key(pkcs=8).decode())
+    return RSAKeyPair(keysize)
 
 
 def rsa_sign(privkey: Union[bytes, str, RSA.RsaKey], message: Union[str, bytes]) -> bytes:
