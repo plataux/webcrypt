@@ -125,4 +125,5 @@ def load_gauth_meta() -> GauthMeta:
 
 
 def load_google_jwks(meta: GauthMeta) -> Dict[str, List[Any]]:
-    return requests.get(meta.jwks_uri).json()
+    keys: Dict[str, List[Any]] = requests.get(meta.jwks_uri).json()
+    return keys

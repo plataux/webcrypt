@@ -132,7 +132,7 @@ def jwt_create(issuer=None,
     return tk
 
 
-def jwt_encode(token: Union[Token, Dict], privkey: Union[str, bytes, Dict[str, str]],
+def jwt_encode(token: Union[Token, Dict[str, Any]], privkey: Union[str, bytes, Dict[str, str]],
                access_token=None) -> str:
     if isinstance(token, Token):
         token = token.dict(exclude_unset=True)
@@ -149,15 +149,15 @@ def jwt_decode(token_encoded: str, pubkey: Union[str, bytes, Dict[str, str]],
                audience=None,
                access_token=None,
                jwt_options=None
-               ) -> Dict:
-    decoded_data = jwt.decode(token_encoded,
-                              pubkey,
-                              algorithms=['RS256'],
-                              issuer=issuer,
-                              subject=subject,
-                              audience=audience,
-                              access_token=access_token,
-                              options=jwt_options)
+               ) -> Dict[str, Any]:
+    decoded_data: Dict[str, Any] = jwt.decode(token_encoded,
+                                              pubkey,
+                                              algorithms=['RS256'],
+                                              issuer=issuer,
+                                              subject=subject,
+                                              audience=audience,
+                                              access_token=access_token,
+                                              options=jwt_options)
     return decoded_data
 
 
