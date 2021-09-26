@@ -179,11 +179,42 @@ def jwt_verify_signature(token_encoded: str,
         return False, dt.decode()
 
 
-def jwe_encrypt(data: str, pubkey: Union[str, bytes, Dict[str, str]]) -> str:
-    ex = bytes(jwe.encrypt(data.encode(), pubkey, algorithm=ALGORITHMS.RSA_OAEP))
+def jwe_encrypt_rsa(data: str, pubkey: Union[str, bytes, Dict[str, str]]) -> str:
+    ex = bytes(jwe.encrypt(data.encode(),
+                           key=pubkey,
+                           encryption=ALGORITHMS.A128GCM,
+                           algorithm=ALGORITHMS.RSA_OAEP))
     return ex.decode()
 
 
-def jwe_decrypt(encrypted_data: str, privkey: Union[str, bytes, Dict[str, str]]) -> str:
+def jwe_decrypt_rsa(encrypted_data: str, privkey: Union[str, bytes, Dict[str, str]]) -> str:
     decrypted_data: bytes = jwe.decrypt(encrypted_data, privkey)
+    return decrypted_data.decode()
+
+
+def jwe_encrypt_aes(data: str, aeskey: bytes) -> str:
+
+    if not (isinstance(aeskey, bytes) and len(aeskey)*8 in (128, 192, 256)):
+        raise ValueError("AES key must be a bytes string of size 128, 192 or 256 bits")
+
+    aeskey: Any
+    sizemap = {
+        128: ALGORITHMS.A128GCM,
+        192: ALGORITHMS.A192GCM,
+        256: ALGORITHMS.A256GCM
+    }
+
+    ex = bytes(jwe.encrypt(data.encode(),
+                           key=aeskey,
+                           encryption=sizemap[len(aeskey) * 8],
+                           algorithm=ALGORITHMS.DIR))
+    return ex.decode()
+
+
+def jwe_decrypt_aes(encrypted_data: str, aeskey: bytes) -> str:
+    if not (isinstance(aeskey, bytes) and len(aeskey)*8 in (128, 192, 256)):
+        raise ValueError("AES key must be a bytes string of size 128, 192 or 256 bits")
+
+    aeskey: Any
+    decrypted_data: bytes = jwe.decrypt(encrypted_data, aeskey)
     return decrypted_data.decode()

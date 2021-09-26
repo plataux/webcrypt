@@ -35,7 +35,7 @@ def test_token_jwe():
     assert jwt_verify_signature(access_encoded, kp.pubkey)[0]
     assert not jwt_verify_signature(access_encoded, kp2.pubkey)[0]
 
-    access_encrypted = jwe_encrypt(access_encoded, kp.pubkey)
+    access_encrypted = jwe_encrypt_rsa(access_encoded, kp.pubkey)
 
     id_token = jwt_create(expires=exp_create(seconds=1))
 
@@ -51,7 +51,7 @@ def test_token_jwe():
 
     assert json.dumps(id_dict) == id_token.json(exclude_unset=True)
 
-    access_decrypted = jwe_decrypt(access_encrypted, kp.privkey)
+    access_decrypted = jwe_decrypt_rsa(access_encrypted, kp.privkey)
 
     assert access_decrypted == access_encoded
 
