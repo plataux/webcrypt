@@ -215,7 +215,7 @@ class RSAKeyPair:
 
 
 class AESKey:
-    def __init__(self, keysize: Optional[int] = None):
+    def __init__(self, keysize: Optional[int] = 128):
         if keysize is not None:
             self._key: Optional[bytes] = aes_genkey(keysize)
         else:
@@ -270,7 +270,7 @@ english : {self.aes_english}
 
     @classmethod
     def import_key(cls, key: Union[str, List[int]]):
-        k = cls()
+        k = cls(None)
         k.key = aes_parse_to_bytes(key)
         return k
 
@@ -422,7 +422,7 @@ def aes_genkey(keysize=128) -> bytes:
 
 
 def aes_export(key: bytes) -> AESKey:
-    k = AESKey()
+    k = AESKey(None)
     k.key = key
     return k
 
