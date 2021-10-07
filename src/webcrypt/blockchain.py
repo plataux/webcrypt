@@ -38,18 +38,19 @@ def eth_gen_pubkey_compressed(privkey_hex: str) -> str:
             privkey_hex = privkey_hex[2:]
         kx = ec.derive_private_key(hexstring_to_int(privkey_hex), _curve)
     else:
-        raise ValueError("privkey has to be a str, int or EllipticCurvePrivateKey type")
+        raise ValueError("privkey_hex has to be a str")
 
     return kx.public_key().public_bytes(encoding=serialization.Encoding.X962,
                                         format=serialization.PublicFormat.CompressedPoint).hex()
 
 
-def eth_gen_address(pubkey_hex: str, with_checksum=True) -> str:
-    if '0x' == pubkey_hex[:2]:
-        pubkey_hex = pubkey_hex[2:]
+def eth_gen_address(pubkey_hex_compressed: str, with_checksum=True) -> str:
+    if '0x' == pubkey_hex_compressed[:2]:
+        pubkey_hex_compressed = pubkey_hex_compressed[2:]
 
-    pub_obj = ec.EllipticCurvePublicKey.from_encoded_point(curve=_curve,
-                                                           data=bytes.fromhex(pubkey_hex))
+    pub_obj = ec.EllipticCurvePublicKey.from_encoded_point(
+        curve=_curve,
+        data=bytes.fromhex(pubkey_hex_compressed))
 
     pnums = pub_obj.public_numbers()
 
@@ -60,7 +61,7 @@ def eth_gen_address(pubkey_hex: str, with_checksum=True) -> str:
 
     k_digest = kh.hexdigest()
 
-    address = k_digest[-40:]
+    address: str = k_digest[-40:]
 
     if not with_checksum:
         return address
