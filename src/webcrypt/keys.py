@@ -11,6 +11,12 @@ session Keys.
 
 """
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+
 from Cryptodome.Cipher import AES, PKCS1_OAEP
 from Cryptodome.Random import get_random_bytes
 from Cryptodome.Signature import pss
@@ -20,10 +26,13 @@ from Cryptodome.PublicKey import RSA
 from Cryptodome.Util.RFC1751 import key_to_english
 from Cryptodome.Util.RFC1751 import english_to_key
 
+from jose import jwk
+
+from passlib.context import CryptContext
+
 from typing import Union, Optional, Dict, Any, List
 
 from secrets import token_urlsafe
-from passlib.context import CryptContext
 
 from os.path import exists
 import os
@@ -31,9 +40,11 @@ import re
 
 import json
 
-from jose import jwk
+from math import ceil
 
 from base64 import urlsafe_b64encode, urlsafe_b64decode, b16encode, b16decode
+
+from enum import Enum
 
 # https://searchsecurity.techtarget.com/definition/Advanced-Encryption-Standard
 
@@ -53,7 +64,8 @@ class RSAKeyPair:
 
     Stores the private Key in PKCS#8 format (PrivateKeyInfo), which is optional.
 
-    The reason Private Keys are optional is because most client applications will be dealing with
+    The reason Private Keys are optional is because
+    most client applications will be dealing with
     with different hosts/clients public keys/certificates
     to encrypt messages, and verify signatures.
     """
@@ -273,6 +285,12 @@ english : {self.aes_english}
         k = cls(None)
         k.key = aes_parse_to_bytes(key)
         return k
+
+
+class PubkeyFormat(Enum):
+    RAW = 1
+    COMPRESSED = 2
+    UNCOMPRESSED = 3
 
 
 def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
@@ -597,3 +615,101 @@ def password_verify(plain_password: str, hashed_password: str) -> bool:
 def password_hash(password: str) -> str:
     ph: str = _pctx.hash(password)
     return ph
+
+
+def ec_privkey_generate(curve=ec.SECP256K1()) -> ec.EllipticCurvePrivateKey:
+    k = ec.generate_private_key(curve)
+    return k
+
+
+def ec_privkey_to_hex(privkey: ec.EllipticCurvePrivateKey):
+    keysize = privkey.key_size
+    print(keysize)
+    num: int = privkey.private_numbers().private_value
+    return num.to_bytes(int(ceil((keysize / 8))), "big").hex()
+
+
+def ec_privkey_from_hex(privkey_hex: str,
+                        curve=ec.SECP256K1()) -> ec.EllipticCurvePrivateKey:
+    if isinstance(privkey_hex, str):
+        if '0x' == privkey_hex[:2]:
+            privkey_hex = privkey_hex[2:]
+        kx = ec.derive_private_key(int(privkey_hex, 16), curve=curve)
+        return kx
+    else:
+        raise ValueError("privkey_hex has to be a str")
+
+
+def ec_pubkey_to_hex(pubkey: ec.EllipticCurvePublicKey,
+                     pubkey_format=PubkeyFormat.COMPRESSED) -> str:
+    if pubkey_format == PubkeyFormat.COMPRESSED:
+        return pubkey.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.CompressedPoint).hex()
+
+    else:
+        pub_hex = pubkey.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint).hex()
+
+        if pubkey_format == PubkeyFormat.UNCOMPRESSED:
+            return pub_hex
+
+        if pubkey_format == PubkeyFormat.RAW:
+            return pub_hex[2:]
+
+
+def ec_pubkey_from_hex(pubkey_hex: str,
+                       curve=ec.SECP256K1(),
+                       pubkey_format=PubkeyFormat.COMPRESSED) -> ec.EllipticCurvePublicKey:
+    if pubkey_format in (PubkeyFormat.COMPRESSED, PubkeyFormat.UNCOMPRESSED):
+        return ec.EllipticCurvePublicKey.from_encoded_point(curve=curve,
+                                                            data=bytes.fromhex(pubkey_hex))
+
+    elif pubkey_format == PubkeyFormat.RAW:
+        pub_raw = bytes.fromhex(pubkey_hex)
+
+        ks = int(ceil((curve.key_size / 8)))
+
+        pn = ec.EllipticCurvePublicNumbers(int.from_bytes(pub_raw[0:ks], "big"),
+                                           int.from_bytes(pub_raw[ks: ks * 2], "big"), curve)
+        return pn.public_key()
+
+    else:
+        raise ValueError("unknown Pubkey Format")
+
+
+def ec_dh_derive_key(privkey: ec.EllipticCurvePrivateKey, pubkey: ec.EllipticCurvePublicKey,
+                     keysize=128,
+                     salt: Optional[bytes] = None,
+                     info: Optional[bytes] = None):
+    shared_key = privkey.exchange(ec.ECDH(), pubkey)
+
+    if not isinstance(keysize, int) or keysize not in (128, 192, 256):
+        raise ValueError('AES Key length can be one of 128, 192, 256')
+
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=int(keysize / 8),
+        salt=salt,
+        info=info,
+    ).derive(shared_key)
+
+    return derived_key
+
+
+def ec_sign(privkey: ec.EllipticCurvePrivateKey, data: bytes) -> bytes:
+    signature = privkey.sign(
+        data, ec.ECDSA(hashes.SHA256())
+    )
+    return signature
+
+
+def ec_verify(pubkey: ec.EllipticCurvePublicKey,
+              data: bytes,
+              signature: bytes) -> bool:
+    try:
+        pubkey.verify(signature, data, ec.ECDSA(hashes.SHA256()))
+        return True
+    except InvalidSignature:
+        return False
