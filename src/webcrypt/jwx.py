@@ -197,7 +197,7 @@ def jwe_encrypt_aes(data: str, aeskey: bytes) -> str:
     if not (isinstance(aeskey, bytes) and len(aeskey)*8 in (128, 192, 256)):
         raise ValueError("AES key must be a bytes string of size 128, 192 or 256 bits")
 
-    aeskey: Any
+    # aeskey: Any = aeskey
     sizemap = {
         128: ALGORITHMS.A128GCM,
         192: ALGORITHMS.A192GCM,
@@ -215,6 +215,6 @@ def jwe_decrypt_aes(encrypted_data: str, aeskey: bytes) -> str:
     if not (isinstance(aeskey, bytes) and len(aeskey)*8 in (128, 192, 256)):
         raise ValueError("AES key must be a bytes string of size 128, 192 or 256 bits")
 
-    aeskey: Any
+    # aeskey: Any
     decrypted_data: bytes = jwe.decrypt(encrypted_data, aeskey)
     return decrypted_data.decode()

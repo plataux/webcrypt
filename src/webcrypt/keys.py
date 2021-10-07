@@ -277,6 +277,7 @@ english : {self.aes_english}
 
 def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
     """
+
     RSA Key types: 1024, 2048 and 3072, and 4096
     Key size of 1024 can be used to sign and verify JWTs withAlgorithm RS256
 
@@ -332,6 +333,7 @@ def rsa_verify(pubkey: Union[bytes, str, RSA.RsaKey], message: Union[str, bytes]
 
 def rsa_encrypt(pubkey: Union[bytes, str, RSA.RsaKey], message: bytes) -> bytes:
     """
+
     In general, encryption with RSA Public Keys is slow, and the message size is limited.
     Moreover, it is not recommended, because if the Private Key is ever leaked,
     Any encrypted Messages that have been previously stored by a bad actor can now be
@@ -384,6 +386,7 @@ def rsa_gen_ssh_authorized_key(privkey: Union[bytes, str, RSA.RsaKey],
                                email: Optional[str] = None) -> str:
     """
     generate the ssh-rsa string that is ready to go to the ~/.ssh/authorized_keys file
+
     :param privkey:
     :param email:
     :return:
@@ -430,6 +433,7 @@ def aes_export(key: bytes) -> AESKey:
 def aes_parse_to_bytes(key: Union[str, List[int]]) -> bytes:
     """
     Parse an AES key from integer array, base16 string, base64 string, or english words form
+
     :param key:
     :return: AES key (128, 192 or 256 bits) in byte data type
     """
@@ -480,9 +484,11 @@ def aes_encrypt(aeskey: bytes, data: bytes) -> bytes:
     """
     AES encryption with GCM Mode, which is one of the fastest, and a good choice for the web.
     GCM is now part of the standard TLS suite
+
     :param aeskey: 128, 192 or 256 bit AES binary key
     :param data:
     :return: Encrypted Binary Data
+
     """
     cipher: Any = AES.new(aeskey, mode=AES.MODE_GCM)
 
@@ -574,6 +580,7 @@ def doc_hybrid_decrypt_from_b64(privkey: Union[bytes, str, RSA.RsaKey],
 def password_generate(byte_size: int = 12) -> str:
     """
     URL safe random password of at least 10 bytes strength
+
     :param byte_size:
     :return:
     """
