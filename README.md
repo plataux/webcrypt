@@ -1,3 +1,3 @@
 # webcrypt
 
-Highlevel APIs for Web App cryptography, security and password management
+Highlevel APIs for general purpose web cryptography, security and password management
