@@ -15,7 +15,11 @@ from webcrypt._blockchain_math import (ecdsa_raw_sign,
 
 import sha3
 
+from mnemonic import Mnemonic
+from bip32 import BIP32
+
 _curve = ec.SECP256K1()
+_nemo = Mnemonic("english")
 
 
 def hexstring_from_int(num: int, bits=256) -> str:
@@ -133,3 +137,29 @@ def eth_verify_msg(sig_hex: str, msg: str, with_prefix=True) -> bool:
     pubkey_raw = ecdsa_raw_recover(msg_hash, (r, s, v))
 
     return ecdsa_raw_verify(msg_hash, (r, s), pubkey_raw)
+
+
+def eth_bip39_generate(bits=128):
+    return _nemo.generate(bits)
+
+
+def eth_bip39_seed_from_nmemonic(words: str, passphrase="") -> bytes:
+    return _nemo.to_seed(words, passphrase=passphrase)
+
+
+def eth_bip32_derive_privkey(seed, account=0, wallet=0) -> str:
+    # standard across all blockchains
+    purpose = '44'
+
+    # Ethereum = 60, bitcoin = 0, testnet for all coins = 1
+    eth_id = '60'
+
+    # for bitcoin was originally created to send the "change" of the transaction
+    # IE the wallet leftover to certain addresses. Should be set to 0 for ethereum
+    change = '0'
+
+    derivation_path = f"m/{purpose}'/{eth_id}'/{account}'/{change}/{wallet}"
+
+    bip32 = BIP32.from_seed(seed)
+
+    return bip32.get_privkey_from_path(derivation_path).hex()
