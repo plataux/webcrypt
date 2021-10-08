@@ -655,8 +655,11 @@ def ec_pubkey_to_hex(pubkey: ec.EllipticCurvePublicKey,
         if pubkey_format == PubkeyFormat.UNCOMPRESSED:
             return pub_hex
 
-        if pubkey_format == PubkeyFormat.RAW:
+        elif pubkey_format == PubkeyFormat.RAW:
             return pub_hex[2:]
+
+        else:
+            raise ValueError("unknown PubkeyFormat")
 
 
 def ec_pubkey_from_hex(pubkey_hex: str,
