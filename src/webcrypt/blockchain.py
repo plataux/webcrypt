@@ -156,7 +156,7 @@ def eth_verify_doc(doc_json: str, with_prefix=True) -> bool:
     return eth_verify_msg(doc["sig"], doc["msg"], with_prefix)
 
 
-def eth_bip39_gen_mnemonic(bits=128):
+def eth_bip39_gen_mnemonic(bits=128) -> str:
     return _nemo.generate(bits)
 
 
@@ -164,7 +164,7 @@ def eth_bip39_seed_from_mnemonic(words: str, passphrase="") -> bytes:
     return _nemo.to_seed(words, passphrase=passphrase)
 
 
-def eth_bip44_derive_privkey(seed, account=0, change=0, index=0) -> str:
+def eth_bip44_derive_privkey(seed: bytes, account=0, change=0, index=0) -> str:
     """
     https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 
@@ -172,8 +172,17 @@ def eth_bip44_derive_privkey(seed, account=0, change=0, index=0) -> str:
     :param account: allows to organize the funds in the same fashion as bank accounts
     :param change: 0 for external facing addresses, and 1 for internal (transaction change)
     :param index: address / private-key index within a user account
-    :return:
+    :return: derived private key in hex based on bip44 parameters
     """
+
+    if change not in (0, 1):
+        raise ValueError("the Change bip44 parameter can be 0 for external, 1 for internal")
+
+    if not (isinstance(account, int) and account >= 0):
+        raise ValueError("account should be an int of value >= 0")
+
+    if not (isinstance(index, int) and index >= 0):
+        raise ValueError("wallet index should be an int of value >= 0")
 
     # bip44 standard across all blockchains
     purpose = 44
