@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from cryptography.hazmat.primitives import serialization
@@ -139,11 +140,11 @@ def eth_verify_msg(sig_hex: str, msg: str, with_prefix=True) -> bool:
     return ecdsa_raw_verify(msg_hash, (r, s), pubkey_raw)
 
 
-def eth_bip39_generate(bits=128):
+def eth_bip39_gen_mnemonic(bits=128):
     return _nemo.generate(bits)
 
 
-def eth_bip39_seed_from_nmemonic(words: str, passphrase="") -> bytes:
+def eth_bip39_seed_from_mnemonic(words: str, passphrase="") -> bytes:
     return _nemo.to_seed(words, passphrase=passphrase)
 
 
