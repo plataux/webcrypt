@@ -57,6 +57,13 @@ _pctx = CryptContext(schemes=[
     "md5_crypt"
 ], deprecated="auto")
 
+_supported_curves = {
+    "secp256k1": ec.SECP256K1(),
+    "secp256r1": ec.SECP256R1(),
+    "secp384r1": ec.SECP384R1(),
+    "secp521r1": ec.SECP521R1(),
+}
+
 
 class RSAKeyPair:
     """
@@ -618,6 +625,9 @@ def password_hash(password: str) -> str:
 
 
 def ec_privkey_generate(curve=ec.SECP256K1()) -> ec.EllipticCurvePrivateKey:
+    if curve not in _supported_curves:
+        raise ValueError(
+            "Only these curves supported: secp256k1, secp256r1, secp384r1, secp521r1")
     k = ec.generate_private_key(curve)
     return k
 
@@ -716,3 +726,30 @@ def ec_verify(pubkey: ec.EllipticCurvePublicKey,
         return True
     except InvalidSignature:
         return False
+
+
+def ec_sign_doc(privkey: ec.EllipticCurvePrivateKey, msg: str) -> str:
+    sig = urlsafe_b64encode(ec_sign(privkey, msg.encode())).decode()
+    sig_doc = {
+        "msg": msg,
+        "sig": sig,
+        "pubkey": ec_pubkey_to_hex(privkey.public_key()),
+        "curve": privkey.curve.name
+    }
+    return json.dumps(sig_doc, indent=1)
+
+
+def ec_verify_doc(doc_json: str) -> bool:
+    doc_data = json.loads(doc_json)
+    sig = doc_data["sig"]
+    msg = doc_data["msg"]
+    pubkey_hex = doc_data["pubkey"]
+    curve = doc_data["curve"]
+
+    if curve not in _supported_curves:
+        raise ValueError(
+            "Only these curves supported: secp256k1, secp256r1, secp384r1, secp521r1")
+
+    pubkey = ec_pubkey_from_hex(pubkey_hex, curve=_supported_curves[curve])
+
+    return ec_verify(pubkey, msg.encode(), urlsafe_b64decode(sig))
