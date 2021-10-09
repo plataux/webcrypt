@@ -148,7 +148,7 @@ def eth_sign_doc(privkey_hex: str, msg: str, with_prefix=True) -> str:
         "msg": msg,
         "sig": sig,
     }
-    return json.dumps(doc,indent=1)
+    return json.dumps(doc, indent=1)
 
 
 def eth_verify_doc(doc_json: str, with_prefix=True) -> bool:
@@ -164,18 +164,25 @@ def eth_bip39_seed_from_mnemonic(words: str, passphrase="") -> bytes:
     return _nemo.to_seed(words, passphrase=passphrase)
 
 
-def eth_bip32_derive_privkey(seed, account=0, wallet=0) -> str:
-    # standard across all blockchains
-    purpose = '44'
+def eth_bip44_derive_privkey(seed, account=0, change=0, index=0) -> str:
+    """
+    https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+
+    :param seed: derived from mnemonic
+    :param account: allows to organize the funds in the same fashion as bank accounts
+    :param change: 0 for external facing addresses, and 1 for internal (transaction change)
+    :param index: address / private-key index within a user account
+    :return:
+    """
+
+    # bip44 standard across all blockchains
+    purpose = 44
 
     # Ethereum = 60, bitcoin = 0, testnet for all coins = 1
-    eth_id = '60'
+    eth_id = 60
 
-    # for bitcoin was originally created to send the "change" of the transaction
-    # IE the wallet leftover to certain addresses. Should be set to 0 for ethereum
-    change = '0'
-
-    derivation_path = f"m/{purpose}'/{eth_id}'/{account}'/{change}/{wallet}"
+    # the single quote indicates a hardened address
+    derivation_path = f"m/{purpose}'/{eth_id}'/{account}'/{change}/{index}"
 
     bip32 = BIP32.from_seed(seed)
 
