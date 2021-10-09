@@ -18,6 +18,7 @@ import sha3
 
 from mnemonic import Mnemonic
 from bip32 import BIP32
+import json
 
 _curve = ec.SECP256K1()
 _nemo = Mnemonic("english")
@@ -138,6 +139,21 @@ def eth_verify_msg(sig_hex: str, msg: str, with_prefix=True) -> bool:
     pubkey_raw = ecdsa_raw_recover(msg_hash, (r, s, v))
 
     return ecdsa_raw_verify(msg_hash, (r, s), pubkey_raw)
+
+
+def eth_sign_doc(privkey_hex: str, msg: str, with_prefix=True) -> str:
+    sig = eth_sign_msg(privkey_hex, msg, with_prefix)
+    doc = {
+        "address": eth_gen_address(eth_gen_pubkey_compressed(privkey_hex)),
+        "msg": msg,
+        "sig": sig,
+    }
+    return json.dumps(doc,indent=1)
+
+
+def eth_verify_doc(doc_json: str, with_prefix=True) -> bool:
+    doc = json.loads(doc_json)
+    return eth_verify_msg(doc["sig"], doc["msg"], with_prefix)
 
 
 def eth_bip39_gen_mnemonic(bits=128):
