@@ -232,6 +232,9 @@ class RSAKeyPair:
         elif "kty" in dx and dx.get("kty") == "RSA":
             return cls.import_jwk({'pubkey': dx})
 
+    def export_json(self):
+        return json.dumps(self.export_jwk(), indent=2)
+
 
 class AESKey:
     def __init__(self, keysize: Optional[int] = 128):
@@ -304,7 +307,6 @@ def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
     """
 
     RSA Key types: 1024, 2048 and 3072, and 4096
-    Key size of 1024 can be used to sign and verify JWTs withAlgorithm RS256
 
     * 1024 bit RSA
     * 2048 bit RSA (recommended - most common)
@@ -625,7 +627,7 @@ def password_hash(password: str) -> str:
 
 
 def ec_privkey_generate(curve=ec.SECP256K1()) -> ec.EllipticCurvePrivateKey:
-    if curve not in _supported_curves:
+    if curve.name not in _supported_curves:
         raise ValueError(
             "Only these curves supported: secp256k1, secp256r1, secp384r1, secp521r1")
     k = ec.generate_private_key(curve)
