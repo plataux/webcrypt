@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
+import cryptography.hazmat.primitives.asymmetric.ed25519 as ed
 
 from Cryptodome.Cipher import AES, PKCS1_OAEP
 from Cryptodome.Random import get_random_bytes
@@ -730,28 +731,77 @@ def ec_verify(pubkey: ec.EllipticCurvePublicKey,
         return False
 
 
-def ec_sign_doc(privkey: ec.EllipticCurvePrivateKey, msg: str) -> str:
-    sig = urlsafe_b64encode(ec_sign(privkey, msg.encode())).decode()
+def ed_privkey_generate() -> ed.Ed25519PrivateKey:
+    return ed.Ed25519PrivateKey.generate()
+
+
+def ed_privkey_to_hex(privkey: ed.Ed25519PrivateKey) -> str:
+    pb: bytes = privkey.private_bytes(encoding=serialization.Encoding.Raw,
+                                      format=serialization.PrivateFormat.Raw,
+                                      encryption_algorithm=serialization.NoEncryption())
+    return pb.hex()
+
+
+def ed_privkey_from_hex(privkey_hex: str) -> ed.Ed25519PrivateKey:
+    edk = ed.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(privkey_hex))
+    return edk
+
+
+def ed_pubkey_to_hex(pubkey: ed.Ed25519PublicKey) -> str:
+    return pubkey.public_bytes(serialization.Encoding.Raw,
+                               serialization.PublicFormat.Raw).hex()
+
+
+def ed_pubkey_from_hex(pubkey_hex: str) -> ed.Ed25519PublicKey:
+    return ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex))
+
+
+def ed_sign(privkey: ed.Ed25519PrivateKey, data: bytes) -> bytes:
+    return privkey.sign(data)
+
+
+def ed_verify(pubkey: ed.Ed25519PublicKey, data: bytes, signature: bytes) -> bool:
+    try:
+        pubkey.verify(signature=signature, data=data)
+        return True
+    except InvalidSignature:
+        return False
+
+
+def doc_sign(privkey: Union[ec.EllipticCurvePrivateKey, ed.Ed25519PrivateKey],
+             msg: str) -> dict:
+
+    if isinstance(privkey, ec.EllipticCurvePrivateKey):
+        sig = urlsafe_b64encode(ec_sign(privkey, msg.encode())).decode()
+        curve = privkey.curve.name
+        pubkey = ec_pubkey_to_hex(privkey.public_key())
+    elif isinstance(privkey, ed.Ed25519PrivateKey):
+        sig = urlsafe_b64encode(ed_sign(privkey, msg.encode())).decode()
+        curve = "Curve25519"
+        pubkey = ed_pubkey_to_hex(privkey.public_key())
+    else:
+        raise ValueError(f"Unsupported Private key: {type(privkey)}")
     sig_doc = {
         "msg": msg,
         "sig": sig,
-        "pubkey": ec_pubkey_to_hex(privkey.public_key()),
-        "curve": privkey.curve.name
+        "pubkey": pubkey,
+        "curve": curve
     }
-    return json.dumps(sig_doc, indent=1)
+    return sig_doc
 
 
-def ec_verify_doc(doc_json: str) -> bool:
-    doc_data = json.loads(doc_json)
-    sig = doc_data["sig"]
-    msg = doc_data["msg"]
-    pubkey_hex = doc_data["pubkey"]
-    curve = doc_data["curve"]
-
-    if curve not in _supported_curves:
+def doc_verify(doc: dict) -> bool:
+    sig = doc["sig"]
+    msg = doc["msg"]
+    pubkey_hex = doc["pubkey"]
+    curve = doc["curve"]
+    if curve == 'Curve25519':
+        pubkey = ed_pubkey_from_hex(pubkey_hex)
+        return ed_verify(pubkey, msg.encode(), urlsafe_b64decode(sig))
+    elif curve in _supported_curves:
+        pubkey = ec_pubkey_from_hex(pubkey_hex, curve=_supported_curves[curve])
+        return ec_verify(pubkey, msg.encode(), urlsafe_b64decode(sig))
+    else:
         raise ValueError(
-            "Only these curves supported: secp256k1, secp256r1, secp384r1, secp521r1")
-
-    pubkey = ec_pubkey_from_hex(pubkey_hex, curve=_supported_curves[curve])
-
-    return ec_verify(pubkey, msg.encode(), urlsafe_b64decode(sig))
+            "Only these curves supported: Curve25519, "
+            "secp256k1, secp256r1, secp384r1, secp521r1")
