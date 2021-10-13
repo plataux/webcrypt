@@ -6,4 +6,4 @@ security and password management
 
 install with
 
-``pip install "git+https://github.com/plataux/webcrypt@v0.1.0"``
+``pip install "git+https://github.com/plataux/webcrypt@v0.2.0"``
