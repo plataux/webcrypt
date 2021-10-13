@@ -190,9 +190,11 @@ def eth_bip44_derive_privkey(seed: bytes, account=0, change=0, index=0) -> str:
     # Ethereum = 60, bitcoin = 0, testnet for all coins = 1
     eth_id = 60
 
-    # the single quote indicates a hardened address
+    # the single quote indicates a hardened path component
     derivation_path = f"m/{purpose}'/{eth_id}'/{account}'/{change}/{index}"
 
     bip32 = BIP32.from_seed(seed)
 
-    return bip32.get_privkey_from_path(derivation_path).hex()
+    priv_hex: str = bip32.get_privkey_from_path(derivation_path).hex()
+
+    return priv_hex
