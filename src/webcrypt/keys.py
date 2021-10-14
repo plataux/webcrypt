@@ -10,16 +10,18 @@ Several High level Hybrid Encryption and Decryption functions that combine RSA P
 session Keys.
 
 """
+from __future__ import annotations
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import cryptography.hazmat.primitives.asymmetric.ed25519 as ed
 
-from Cryptodome.Cipher import AES, PKCS1_OAEP
-from Cryptodome.Random import get_random_bytes
+
+from Cryptodome.Cipher import PKCS1_OAEP
 from Cryptodome.Signature import pss
 from Cryptodome.Hash import SHA256
 from Cryptodome.PublicKey import RSA
@@ -297,6 +299,13 @@ english : {self.aes_english}
         k.key = aes_parse_to_bytes(key)
         return k
 
+    def encrypt(self, data: bytes, auth_data: Optional[bytes] = None) -> bytes:
+        return aes_encrypt(self.key, data, auth_data)
+
+    def decrypt(self, data_encrypted: bytes,
+                auth_data: Optional[bytes] = None) -> bytes:
+        return aes_decrypt(self.key, data_encrypted, auth_data)
+
 
 class PubkeyFormat(Enum):
     RAW = 1
@@ -447,9 +456,7 @@ def aes_genkey(keysize=128) -> bytes:
     :return: AES key
     :rtype: bytes
     """
-    if not isinstance(keysize, int) or keysize not in (128, 192, 256):
-        raise ValueError('AES Key length can be one of 128, 192, 256')
-    return get_random_bytes(int(keysize / 8))
+    return AESGCM.generate_key(bit_length=keysize)
 
 
 def aes_export(key: bytes) -> AESKey:
@@ -460,7 +467,8 @@ def aes_export(key: bytes) -> AESKey:
 
 def aes_parse_to_bytes(key: Union[str, List[int]]) -> bytes:
     """
-    Parse an AES key from integer array, base16 string, base64 string, or english words form
+    Parse an AES key from integer array, base16 string, base64 string,
+    or english words form
 
     :param key:
     :return: AES key (128, 192 or 256 bits) in byte data type
@@ -508,50 +516,53 @@ def aes_parse_to_bytes(key: Union[str, List[int]]) -> bytes:
         raise ValueError("key to be parsed can only be of type str, or List[int]")
 
 
-def aes_encrypt(aeskey: bytes, data: bytes) -> bytes:
+def aes_encrypt(aeskey: bytes | AESKey, data: bytes,
+                auth_data: bytes = None) -> bytes:
     """
-    AES encryption with GCM Mode, which is one of the fastest, and a good choice for the web.
+    AES encryption with GCM Mode, which is fast, open and secure,
+    and a good choice for the web.
     GCM is now part of the standard TLS suite
 
+    :param auth_data: None-Encrypted Authenticated data
     :param aeskey: 128, 192 or 256 bit AES binary key
-    :param data:
-    :return: Encrypted Binary Data
+    :param data: binary data of less than 4.0 Gb size
+    :return: Encrypted Binary Data with 12-byte nonce iv appended at the head
 
     """
-    cipher: Any = AES.new(aeskey, mode=AES.MODE_GCM)
+    aesgcm = AESGCM(aeskey if isinstance(aeskey, bytes) else aeskey.key)
+    nonce = os.urandom(12)  # 96-bits for best performance
+    ciphertext = aesgcm.encrypt(nonce, data, auth_data)
 
-    ciphertext, tag = cipher.encrypt_and_digest(data)
-
-    # to decrypt, we will need to split these three values
-    # cipher.nonce=16 bytes, tag=16 bytes, ciphertext the rest of the bytes
-    encrypted_data: bytes = cipher.nonce + tag + ciphertext
+    encrypted_data: bytes = nonce + ciphertext
 
     return encrypted_data
 
 
-def aes_decrypt(aeskey: bytes, data_encrypted: bytes) -> bytes:
+def aes_decrypt(aeskey: bytes | AESKey, data_encrypted: bytes,
+                auth_data: bytes = None) -> bytes:
     """
     AES decryption in GCM mode
+
+    :param auth_data: Authenticated Non-Encrypted Data
     :param aeskey: 128, 192 or 256 AES key
     :param data_encrypted:
     :return:
     """
-    nonce, tag, ciphertext = data_encrypted[:16], data_encrypted[16:32], data_encrypted[32:]
+    aesgcm = AESGCM(aeskey if isinstance(aeskey, bytes) else aeskey.key)
+    nonce, ciphertext = data_encrypted[:12], data_encrypted[12:]
 
-    cipher: Any = AES.new(aeskey, AES.MODE_GCM, nonce)
-
-    data: bytes = cipher.decrypt_and_verify(ciphertext, tag)
+    data: bytes = aesgcm.decrypt(nonce, ciphertext, auth_data)
 
     return data
 
 
-def aes_encrypt_to_base64(aeskey: bytes, bin_data: bytes) -> str:
+def aes_encrypt_to_base64(aeskey: bytes | AESKey, bin_data: bytes) -> str:
     encryp_b = aes_encrypt(aeskey, bin_data)
     encryp_b64str = urlsafe_b64encode(encryp_b).decode()
     return encryp_b64str
 
 
-def aes_decrypt_from_base64(aeskey: bytes, encr_b64: str) -> bytes:
+def aes_decrypt_from_base64(aeskey: bytes | AESKey, encr_b64: str) -> bytes:
     dt = aes_decrypt(aeskey, urlsafe_b64decode(encr_b64.encode()))
     return dt
 
@@ -577,14 +588,14 @@ def hybrid_decrypt(privkey: Union[bytes, str, RSA.RsaKey], bindata: bytes) -> by
     return aes_decrypt(aes_key, bindata[rsa_keysize:])
 
 
-def doc_aes_encrypt_to_b64(aeskey: bytes, document: Dict[Any, Any]) -> str:
+def doc_aes_encrypt_to_b64(aeskey: bytes | AESKey, document: Dict[Any, Any]) -> str:
     doc_b = json.dumps(document).encode()
     encryp_b = aes_encrypt(aeskey, doc_b)
     encryp_b64str = urlsafe_b64encode(encryp_b).decode()
     return encryp_b64str
 
 
-def doc_aes_decrypt_from_b64(aeskey: bytes, encr_b64: str) -> Dict[Any, Any]:
+def doc_aes_decrypt_from_b64(aeskey: bytes | AESKey, encr_b64: str) -> Dict[Any, Any]:
     dt_json = aes_decrypt(aeskey, urlsafe_b64decode(encr_b64.encode())).decode()
     out: Dict[Any, Any] = json.loads(dt_json)
     return out
@@ -770,7 +781,6 @@ def ed_verify(pubkey: ed.Ed25519PublicKey, data: bytes, signature: bytes) -> boo
 
 def doc_sign(privkey: Union[ec.EllipticCurvePrivateKey, ed.Ed25519PrivateKey],
              msg: str) -> dict:
-
     if isinstance(privkey, ec.EllipticCurvePrivateKey):
         sig = urlsafe_b64encode(ec_sign(privkey, msg.encode())).decode()
         curve = privkey.curve.name
