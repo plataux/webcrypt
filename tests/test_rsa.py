@@ -81,11 +81,6 @@ def test_rsa_sign_verify(message, rsa_keys: Dict[int, wk.RSAKeyPair]):
         assert wk.rsa_verify(key.pubkey, message, sig)
 
 
-# [(86, 1024),
-#      (214, 2048),
-#      (342, 3072),
-#      (470, 4096)]
-
 @pytest.mark.parametrize(
     "message_size,ksize",
     [(62, 1024),
