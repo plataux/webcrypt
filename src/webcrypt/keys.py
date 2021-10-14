@@ -3,8 +3,8 @@ Generate RSA keys, export and import RSA keys to and from several formats, and u
 to sign and verify messages, and encrypt and decrypt small messages.
 
 AES Key Generation, export and import from multiple formats,
-encryption of byte and unicode data, and high level functions to encrypt and decrypt unicode
-strings and json-serializable python dicts
+encryption of byte and unicode data, and high level functions to
+encrypt and decrypt unicode strings and json-serializable python dicts
 
 Several High level Hybrid Encryption and Decryption functions that combine RSA PKI with AES
 session Keys.
@@ -12,24 +12,18 @@ session Keys.
 """
 from __future__ import annotations
 
+from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import serialization as ser
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.asymmetric import padding
 import cryptography.hazmat.primitives.asymmetric.ed25519 as ed
-
-
-from Cryptodome.Cipher import PKCS1_OAEP
-from Cryptodome.Signature import pss
-from Cryptodome.Hash import SHA256
-from Cryptodome.PublicKey import RSA
 
 from Cryptodome.Util.RFC1751 import key_to_english
 from Cryptodome.Util.RFC1751 import english_to_key
-
-from jose import jwk
 
 from passlib.context import CryptContext
 
@@ -84,15 +78,11 @@ class RSAKeyPair:
         """
 
         RSA Key types: 1024, 2048 and 3072, and 4096
-        Key size of 1024 can be used to sign and verify JWTs withAlgorithm RS256
 
-        * 1024 bit RSA
-        * 2048 bit RSA (recommended - most common)
-        * 3072 bit RSA
-        * 4096 bit RSA (none-standard)
-
-        initialize RSAKeyPair with an existing Public key in PEM format, and optionally
-        a Private key in PEM PKCS#8 format
+        * 1024 bit RSA (not recommended - breakable)
+        * 2048 bit RSA (recommended minimal)
+        * 3072 bit RSA (recommended)
+        * 4096 bit RSA
 
         :param keysize:  optional parameter keysize, generate new KeyPair when provided
 
@@ -102,20 +92,27 @@ class RSAKeyPair:
             return
 
         if not isinstance(keysize, int) or keysize not in (1024, 2048, 3072, 4096):
-            raise ValueError('RSA keysize my be an int in (1024, 2048, 3072, 4096)')
+            raise ValueError('RSA keysize can be an int in (1024, 2048, 3072, 4096)')
 
-        key = RSA.generate(keysize)
+        self.privkey: Optional[rsa.RSAPrivateKey] = rsa.generate_private_key(65537,
+                                                                             keysize)
+        self.pubkey: rsa.RSAPublicKey = self.privkey.public_key()
 
-        self.pubkey: str = key.public_key().export_key().decode()
-        self.privkey: Optional[str] = key.export_key(pkcs=8).decode()
+        # key = RSA.generate(keysize)
+        # self.pubkey: str = key.public_key().export_key().decode()
+        # self.privkey: Optional[str] = key.export_key(pkcs=8).decode()
 
-    def keysize(self) -> int:
+    def keysize(self) -> Optional[int]:
         """
         Calculate the RSA bit-size from the public key of this class
 
         :return: RSA keysize in bits (1024, 2048, 3072 or 4096 bits)
         """
-        return RSA.import_key(self.pubkey).size_in_bits()
+        # return RSA.import_key(self.pubkey).size_in_bits()
+        if self.pubkey:
+            return self.pubkey.key_size
+        else:
+            return None
 
     def export_pem_files(self, directory,
                          pubkey_name='pubkey.pem',
@@ -134,11 +131,16 @@ class RSAKeyPair:
         os.makedirs(f'{directory}', mode=0o755, exist_ok=True)
 
         if self.privkey:
+            priv_pem = self.privkey.private_bytes(ser.Encoding.PEM,
+                                                  ser.PrivateFormat.PKCS8,
+                                                  encryption_algorithm=ser.NoEncryption())
             with open(f'{directory}/{privkey_name}', 'w') as fx:
-                fx.write(self.privkey)
+                fx.write(priv_pem.decode())
 
+        pub_pem = self.pubkey.public_bytes(ser.Encoding.PEM,
+                                           ser.PublicFormat.SubjectPublicKeyInfo)
         with open(f'{directory}/{pubkey_name}', 'w') as fx:
-            fx.write(self.pubkey)
+            fx.write(pub_pem.decode())
 
     @classmethod
     def import_pem_files(cls, directory,
@@ -159,58 +161,142 @@ class RSAKeyPair:
             raise ValueError(f'Missing {pubkey_name} file')
 
         with open(pubkey_path) as fx:
-            pubkey = fx.read()
+            pubkey_pem = fx.read()
 
-        privkey = None
+        privkey_pem = None
 
         if exists(privkey_path):
             with open(privkey_path) as fx:
-                privkey = fx.read()
+                privkey_pem = fx.read()
 
         kp: "RSAKeyPair" = cls(None)
-        kp.pubkey = pubkey
-        kp.privkey = privkey
+
+        key = ser.load_pem_public_key(pubkey_pem.encode())
+
+        if isinstance(key, rsa.RSAPublicKey):
+            kp.pubkey = key
+        else:
+            raise TypeError("Incorrect Key Type")
+        if privkey_pem:
+            key2 = ser.load_pem_private_key(privkey_pem.encode(), password=None)
+            if isinstance(key2, rsa.RSAPrivateKey):
+                kp.privkey = key2
+            else:
+                raise TypeError("Incorrect Key Type")
+        else:
+            kp.privkey = None
         return kp
 
-    def export_jwk(self) -> Dict[str, Dict[str, str]]:
-        jx = {
-            'pubkey': jwk.construct(self.pubkey, 'RS256').to_dict(),
-        }
+    def export_pem_data(self) -> Dict[str, bytes]:
+        doc = {}
+
+        if not self.pubkey:
+            raise RuntimeError("attempting to export uninitialized keypair")
+
+        doc['pubkey'] = self.pubkey.public_bytes(
+            ser.Encoding.PEM,
+            ser.PublicFormat.SubjectPublicKeyInfo)
+
         if self.privkey:
-            jx['privkey'] = jwk.construct(self.privkey, 'RS256').to_dict()
-        return jx
+            priv_pem = self.privkey.private_bytes(ser.Encoding.PEM,
+                                                  ser.PrivateFormat.PKCS8,
+                                                  encryption_algorithm=ser.NoEncryption())
+            doc['privkey'] = priv_pem
+
+        return doc
+
+    @classmethod
+    def import_pem_data(cls, pem_data: Dict[str, bytes]) -> "RSAKeyPair":
+        kp: "RSAKeyPair" = cls(None)
+
+        key_pub = ser.load_pem_public_key(pem_data['pubkey'])
+
+        if isinstance(key_pub, rsa.RSAPublicKey):
+            kp.pubkey = key_pub
+        else:
+            raise TypeError("Incorrect Key Type")
+
+        if 'privkey' in pem_data:
+
+            key_priv = ser.load_pem_private_key(pem_data['privkey'],
+                                                password=None)
+            if isinstance(key_priv, rsa.RSAPrivateKey):
+                kp.privkey = key_priv
+            else:
+                raise TypeError("Incorrect Key Type")
+        else:
+            kp.privkey = None
+        return kp
+
+    def export_to_components(self) -> Dict[str, Dict[str, str]]:
+        if not self.pubkey:
+            raise RuntimeError("uninitialized RSAKeyPair")
+
+        comps = {}
+
+        comps['pubkey'] = rsa_pubkey_to_components(self.pubkey)
+
+        if self.privkey:
+            comps['privkey'] = rsa_privkey_to_components(self.privkey)
+
+        return comps
+
+    @classmethod
+    def import_from_components(cls,
+                               rsa_comps: Dict[str, Dict[str, str]]) -> "RSAKeyPair":
+        kp: "RSAKeyPair" = cls(None)
+
+        kp.pubkey = rsa_pubkey_from_components(rsa_comps['pubkey'])
+
+        if 'privkey' in rsa_comps:
+            kp.privkey = rsa_privkey_from_components(rsa_comps['privkey'])
+        else:
+            kp.privkey = None
+        return kp
+
+    def export_jwk(self, alg='RS256') -> Dict[str, Dict[str, str]]:
+        comps = self.export_to_components()
+
+        jwk_doc = {}
+
+        jwk_doc['pubkey'] = {
+            'kty': 'RSA',
+            'alg': alg,
+            **comps['pubkey']
+        }
+
+        if 'privkey' in comps:
+            priv_comp = comps['privkey']
+            jwk_doc['privkey'] = {
+                'kty': 'RSA',
+                'alg': alg,
+                'e': priv_comp['e'],
+                'n': priv_comp['n'],
+                'd': priv_comp['d'],
+                'p': priv_comp['p'],
+                'q': priv_comp['q'],
+                'dp': priv_comp['dmp1'],
+                'dq': priv_comp['dmq1'],
+                'qi': priv_comp['iqmp']
+            }
+
+        return jwk_doc
 
     @classmethod
     def import_jwk(cls, jwk_pair: Dict[str, Dict[str, str]]) -> 'RSAKeyPair':
 
-        pubkey = jwk.RSAKey(jwk_pair['pubkey'], 'RS256').to_pem()[:-1].decode()
+        pubkey = rsa_pubkey_from_components(jwk_pair['pubkey'])
 
         if 'privkey' in jwk_pair:
-            privkey = jwk.RSAKey(jwk_pair['privkey'], 'RS256').to_pem()[:-1].decode()
-        else:
-            privkey = None
+            priv_comp = jwk_pair['privkey'].copy()
 
-        kp: "RSAKeyPair" = cls(None)
-        kp.pubkey = pubkey
-        kp.privkey = privkey
-        return kp
+            priv_comp['dmp1'] = priv_comp['dp']
+            priv_comp['dmq1'] = priv_comp['dq']
+            priv_comp['iqmp'] = priv_comp['qi']
 
-    def export_rsa_objects(self: Any) -> Dict[str, RSA.RsaKey]:
-        dx = {
-            'pubkey': RSA.import_key(self.pubkey)
-        }
+            del priv_comp['dp'], priv_comp['dq'], priv_comp['qi']
 
-        if self.privkey:
-            dx['privkey'] = RSA.import_key(self.privkey)
-
-        return dx
-
-    @classmethod
-    def import_rsa_objects(cls, rsa_pair: Dict[str, RSA.RsaKey]):
-        pubkey = rsa_pair['pubkey'].export_key('PEM').decode()
-
-        if 'privkey' in rsa_pair:
-            privkey: Any = rsa_pair['privkey'].export_key(format='PEM', pkcs=8).decode()
+            privkey: Optional[rsa.RSAPrivateKey] = rsa_privkey_from_components(priv_comp)
         else:
             privkey = None
 
@@ -220,23 +306,10 @@ class RSAKeyPair:
         return kp
 
     def __str__(self) -> str:
-        return json.dumps({'pubkey': self.pubkey, 'privkey': self.privkey})
+        return json.dumps(self.export_pem_data())
 
     def __repr__(self):
-        return json.dumps(self.export_jwk(), indent=2)
-
-    @classmethod
-    def import_json(cls, rsa_jwk_json: str):
-        dx: Dict[str, Any] = json.loads(rsa_jwk_json)
-
-        if 'pubkey' in dx:
-            return cls.import_jwk(dx)
-
-        elif "kty" in dx and dx.get("kty") == "RSA":
-            return cls.import_jwk({'pubkey': dx})
-
-    def export_json(self):
-        return json.dumps(self.export_jwk(), indent=2)
+        return json.dumps(self.export_to_components(), indent=1)
 
 
 class AESKey:
@@ -299,12 +372,20 @@ english : {self.aes_english}
         k.key = aes_parse_to_bytes(key)
         return k
 
-    def encrypt(self, data: bytes, auth_data: Optional[bytes] = None) -> bytes:
-        return aes_encrypt(self.key, data, auth_data)
+    def encrypt(self, data: bytes, auth_data=None) -> bytes:
+
+        if self.key is not None:
+            return aes_encrypt(self.key, data, auth_data)
+        else:
+            raise RuntimeError("Uninitialized AESKey Object")
 
     def decrypt(self, data_encrypted: bytes,
-                auth_data: Optional[bytes] = None) -> bytes:
-        return aes_decrypt(self.key, data_encrypted, auth_data)
+                auth_data=None) -> bytes:
+
+        if self.key is not None:
+            return aes_decrypt(self.key, data_encrypted, auth_data)
+        else:
+            raise RuntimeError("Uninitialized AESKey")
 
 
 class PubkeyFormat(Enum):
@@ -313,15 +394,105 @@ class PubkeyFormat(Enum):
     UNCOMPRESSED = 3
 
 
+def int_to_b64(x: int):
+    return urlsafe_b64encode(x.to_bytes((x.bit_length() + 7) // 8 or 1, "big")).decode()
+
+
+def int_from_b64(x64: str):
+    return int.from_bytes(urlsafe_b64decode(x64.encode()), "big")
+
+
+def rsa_pubkey_to_components(pubkey: rsa.RSAPublicKey) -> Dict[str, str]:
+    pub_num = pubkey.public_numbers()
+    components = {
+        #  e and n are the public numbers
+        "e": int_to_b64(pub_num.e),
+        "n": int_to_b64(pub_num.n),
+    }
+    return components
+
+
+def rsa_pubkey_from_components(comps: Dict[str, str]) -> rsa.RSAPublicKey:
+    pub_num = rsa.RSAPublicNumbers(int_from_b64(comps['e']), int_from_b64(comps['n']))
+    return pub_num.public_key()
+
+
+def rsa_privkey_to_components(privkey: rsa.RSAPrivateKey) -> Dict[str, str]:
+    priv_num = privkey.private_numbers()
+    pub_num = privkey.public_key().public_numbers()
+    components = {
+        # "kty": "RSA",
+        # "alg": "RS256",
+
+        #  e and n are the public numbers
+        "e": int_to_b64(pub_num.e),
+        "n": int_to_b64(pub_num.n),
+
+        # d p q dp dq qi are the private numbers
+        "d": int_to_b64(priv_num.d),
+        "p": int_to_b64(priv_num.p),
+        "q": int_to_b64(priv_num.q),
+        "dmp1": int_to_b64(priv_num.dmp1),  # dp
+        "dmq1": int_to_b64(priv_num.dmq1),  # dq
+        "iqmp": int_to_b64(priv_num.iqmp),  # qi
+    }
+    return components
+
+
+def rsa_privkey_from_components(comps: Dict[str, str]) -> rsa.RSAPrivateKey:
+    pub_num = rsa.RSAPublicNumbers(int_from_b64(comps['e']), int_from_b64(comps['n']))
+    priv_num = rsa.RSAPrivateNumbers(
+        int_from_b64(comps['p']),
+        int_from_b64(comps['q']),
+        int_from_b64(comps['d']),
+        int_from_b64(comps['dmp1']),
+        int_from_b64(comps['dmq1']),
+        int_from_b64(comps['iqmp']),
+        pub_num
+    )
+    return priv_num.private_key()
+
+
+def rsa_pubkey_from_pem(pubkey_pem: bytes | str) -> rsa.RSAPublicKey:
+    pubkey_pem = pubkey_pem if isinstance(pubkey_pem, bytes) else pubkey_pem.encode()
+    key = ser.load_pem_public_key(pubkey_pem)
+    if isinstance(key, rsa.RSAPublicKey):
+        return key
+    else:
+        raise TypeError("Unexpected Key type during deserialization")
+
+
+def rsa_pubkey_to_pem(pubkey: rsa.RSAPublicKey) -> bytes:
+    return pubkey.public_bytes(
+        ser.Encoding.PEM,
+        ser.PublicFormat.SubjectPublicKeyInfo)
+
+
+def rsa_privkey_from_pem(privkey_pem: bytes | str) -> rsa.RSAPrivateKey:
+    privkey_pem = privkey_pem if isinstance(privkey_pem, bytes) else privkey_pem.encode()
+    key = ser.load_pem_private_key(privkey_pem, password=None)
+
+    if isinstance(key, rsa.RSAPrivateKey):
+        return key
+    else:
+        raise TypeError("Unexpected Key type during deserialization")
+
+
+def rsa_privkey_to_pem(privkey: rsa.RSAPrivateKey) -> bytes:
+    return privkey.private_bytes(ser.Encoding.PEM,
+                                 ser.PrivateFormat.PKCS8,
+                                 encryption_algorithm=ser.NoEncryption())
+
+
 def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
     """
 
     RSA Key types: 1024, 2048 and 3072, and 4096
 
-    * 1024 bit RSA
-    * 2048 bit RSA (recommended - most common)
-    * 3072 bit RSA
-    * 4096 bit RSA (none-standard)
+    * 1024 bit RSA (not recommended - breakable)
+    * 2048 bit RSA (recommended minimal)
+    * 3072 bit RSA (recommended)
+    * 4096 bit RSA
 
     :param keysize: bits of the RSA keys
     :type keysize: int
@@ -335,7 +506,8 @@ def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
     return RSAKeyPair(keysize)
 
 
-def rsa_sign(privkey: Union[bytes, str, RSA.RsaKey], message: Union[str, bytes]) -> bytes:
+def rsa_sign(privkey: Union[bytes, str, rsa.RSAPrivateKey],
+             message: Union[str, bytes]) -> bytes:
     if not isinstance(message, (str, bytes)):
         raise ValueError("message can only be str of bytes")
 
@@ -343,32 +515,39 @@ def rsa_sign(privkey: Union[bytes, str, RSA.RsaKey], message: Union[str, bytes])
         message = message.encode()
 
     if isinstance(privkey, (bytes, str)):
-        privkey = RSA.import_key(privkey)
-    message_hash = SHA256.new(message)
-    signature = pss.new(privkey).sign(message_hash)
+        privkey = rsa_privkey_from_pem(privkey)
+
+    signature = privkey.sign(message,
+                             padding.PSS(
+                                 mgf=padding.MGF1(hashes.SHA256()),
+                                 salt_length=padding.PSS.MAX_LENGTH),
+                             hashes.SHA256())
     return signature
 
 
-def rsa_verify(pubkey: Union[bytes, str, RSA.RsaKey], message: Union[str, bytes],
+def rsa_verify(pubkey: Union[bytes, str, rsa.RSAPublicKey], message: Union[str, bytes],
                signature: bytes) -> bool:
     if not isinstance(message, (str, bytes)):
-        raise ValueError("message can only be str of bytes")
+        raise ValueError("message can only be str or bytes")
 
     if isinstance(message, str):
         message = message.encode()
 
     if isinstance(pubkey, (bytes, str)):
-        pubkey = RSA.import_key(pubkey)
-    message_hash = SHA256.new(message)
-    verifier = pss.new(pubkey)
+        pubkey = rsa_pubkey_from_pem(pubkey)
+
     try:
-        verifier.verify(message_hash, signature)
+        pubkey.verify(signature, message,
+                      padding.PSS(
+                          mgf=padding.MGF1(hashes.SHA256()),
+                          salt_length=padding.PSS.MAX_LENGTH),
+                      hashes.SHA256())
         return True
-    except ValueError:
+    except InvalidSignature:
         return False
 
 
-def rsa_encrypt(pubkey: Union[bytes, str, RSA.RsaKey], message: bytes) -> bytes:
+def rsa_encrypt(pubkey: Union[bytes, str, rsa.RSAPublicKey], message: bytes) -> bytes:
     """
 
     In general, encryption with RSA Public Keys is slow, and the message size is limited.
@@ -378,10 +557,10 @@ def rsa_encrypt(pubkey: Union[bytes, str, RSA.RsaKey], message: bytes) -> bytes:
 
     Here are the limits:
 
-    * 1024 RSA - 86  bytes
-    * 2048 RSA - 214 bytes
-    * 3072 RSA - 342 bytes
-    * 4096 RSA - 470 bytes
+    * 1024 RSA - 62  bytes
+    * 2048 RSA - 190 bytes
+    * 3072 RSA - 318 bytes
+    * 4096 RSA - 446 bytes
 
     The preferred strategy is a hybrid of RSA and Session AES Key encryption.
 
@@ -390,46 +569,48 @@ def rsa_encrypt(pubkey: Union[bytes, str, RSA.RsaKey], message: bytes) -> bytes:
     :return: Encrypted Message in bytes, of fixed size
     """
     if isinstance(pubkey, (bytes, str)):
-        pubkey = RSA.import_key(pubkey)
+        pubkey = rsa_pubkey_from_pem(pubkey)
 
-    cipher_rsa = PKCS1_OAEP.new(pubkey)
-    return cipher_rsa.encrypt(message)
+    ciphertext = pubkey.encrypt(
+        message,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return ciphertext
 
 
-def rsa_decrypt(privkey: Union[bytes, str, RSA.RsaKey], message_encrypted: bytes) -> bytes:
+def rsa_decrypt(privkey: Union[bytes, str, rsa.RSAPrivateKey],
+                message_encrypted: bytes) -> bytes:
     if isinstance(privkey, (bytes, str)):
-        privkey = RSA.import_key(privkey)
-    cipher_rsa = PKCS1_OAEP.new(privkey)
-    return cipher_rsa.decrypt(message_encrypted)
+        privkey = rsa_privkey_from_pem(privkey)
+
+    plaintext = privkey.decrypt(
+        message_encrypted,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+
+    return plaintext
 
 
-def rsa_gen_pubkey(privkey: Union[bytes, str, RSA.RsaKey], fmt: str = 'PEM') -> bytes:
-    """
-    generate a new public key from an existing RSA private key
-
-    :param privkey: in PEM bytes, str or RSA.RsaKey object
-    :param fmt: can be one of 'PEM', 'DER', 'OpenSSH'
-    :return: public key in bytes
-    """
-    if not isinstance(fmt, str) or fmt not in ("PEM", "DER", "OpenSSH"):
-        raise ValueError("RSA pubkey fmt can only be a str: 'PEM', 'DER', 'OpenSSH'")
-
-    if isinstance(privkey, (bytes, str)):
-        privkey = RSA.import_key(privkey)
-    return privkey.public_key().export_key(format=fmt)
-
-
-def rsa_gen_ssh_authorized_key(privkey: Union[bytes, str, RSA.RsaKey],
+def rsa_gen_ssh_authorized_key(pubkey: rsa.RSAPublicKey,
                                email: Optional[str] = None) -> str:
     """
-    generate the ssh-rsa string that is ready to go to the ~/.ssh/authorized_keys file
+    generate the ssh-rsa string that is ready to go
+    to the ~/.ssh/authorized_keys file
 
-    :param privkey:
+    :param pubkey:
     :param email:
     :return:
     """
 
-    key_text = rsa_gen_pubkey(privkey, fmt='OpenSSH').decode()
+    key_text = pubkey.public_bytes(ser.Encoding.OpenSSH, ser.PublicFormat.OpenSSH).decode()
 
     if email is None:
         return key_text
@@ -470,7 +651,7 @@ def aes_parse_to_bytes(key: Union[str, List[int]]) -> bytes:
     Parse an AES key from integer array, base16 string, base64 string,
     or english words form
 
-    :param key:
+    :param key: AES key in bytes
     :return: AES key (128, 192 or 256 bits) in byte data type
     """
 
@@ -517,7 +698,7 @@ def aes_parse_to_bytes(key: Union[str, List[int]]) -> bytes:
 
 
 def aes_encrypt(aeskey: bytes | AESKey, data: bytes,
-                auth_data: bytes = None) -> bytes:
+                auth_data=None) -> bytes:
     """
     AES encryption with GCM Mode, which is fast, open and secure,
     and a good choice for the web.
@@ -529,7 +710,14 @@ def aes_encrypt(aeskey: bytes | AESKey, data: bytes,
     :return: Encrypted Binary Data with 12-byte nonce iv appended at the head
 
     """
-    aesgcm = AESGCM(aeskey if isinstance(aeskey, bytes) else aeskey.key)
+
+    if isinstance(aeskey, bytes):
+        aesgcm = AESGCM(aeskey)
+    elif aeskey.key is not None:
+        aesgcm = AESGCM(aeskey.key)
+    else:
+        raise ValueError("Uninitialized AESKey")
+
     nonce = os.urandom(12)  # 96-bits for best performance
     ciphertext = aesgcm.encrypt(nonce, data, auth_data)
 
@@ -539,7 +727,7 @@ def aes_encrypt(aeskey: bytes | AESKey, data: bytes,
 
 
 def aes_decrypt(aeskey: bytes | AESKey, data_encrypted: bytes,
-                auth_data: bytes = None) -> bytes:
+                auth_data: Optional[bytes] = None) -> bytes:
     """
     AES decryption in GCM mode
 
@@ -548,7 +736,13 @@ def aes_decrypt(aeskey: bytes | AESKey, data_encrypted: bytes,
     :param data_encrypted:
     :return:
     """
-    aesgcm = AESGCM(aeskey if isinstance(aeskey, bytes) else aeskey.key)
+    if isinstance(aeskey, bytes):
+        aesgcm = AESGCM(aeskey)
+    elif aeskey.key is not None:
+        aesgcm = AESGCM(aeskey.key)
+    else:
+        raise ValueError("Uninitialized AESKey")
+
     nonce, ciphertext = data_encrypted[:12], data_encrypted[12:]
 
     data: bytes = aesgcm.decrypt(nonce, ciphertext, auth_data)
@@ -567,24 +761,22 @@ def aes_decrypt_from_base64(aeskey: bytes | AESKey, encr_b64: str) -> bytes:
     return dt
 
 
-def hybrid_encrypt(pubkey: Union[bytes, str, RSA.RsaKey], bindata: bytes,
+def hybrid_encrypt(pubkey: Union[bytes, str, rsa.RSAPublicKey], bindata: bytes,
                    keysize=128) -> bytes:
     new_aes = aes_genkey(keysize)
-
     aes_enc = aes_encrypt(new_aes, bindata)
-
     rsa_enc = rsa_encrypt(pubkey, new_aes)
-
     return rsa_enc + aes_enc
 
 
-def hybrid_decrypt(privkey: Union[bytes, str, RSA.RsaKey], bindata: bytes) -> bytes:
-    if isinstance(privkey, (bytes, str)):
-        privkey = RSA.import_key(privkey)
+def hybrid_decrypt(privkey: Union[bytes, str, rsa.RSAPrivateKey],
+                   bindata: bytes) -> bytes:
+    if isinstance(privkey, str) or isinstance(privkey, bytes):
+        privkey = rsa_privkey_from_pem(privkey)
 
-    rsa_keysize = privkey.size_in_bytes()
+    rsa_keysize = int(privkey.key_size / 8)
+
     aes_key = rsa_decrypt(privkey, bindata[:rsa_keysize])
-
     return aes_decrypt(aes_key, bindata[rsa_keysize:])
 
 
@@ -601,7 +793,7 @@ def doc_aes_decrypt_from_b64(aeskey: bytes | AESKey, encr_b64: str) -> Dict[Any,
     return out
 
 
-def doc_hybrid_encrypt_to_b64(pubkey: Union[bytes, str, RSA.RsaKey],
+def doc_hybrid_encrypt_to_b64(pubkey: Union[bytes, str, rsa.RSAPublicKey],
                               document: Dict[Any, Any], keysize: int = 128) -> str:
     doc_b = json.dumps(document).encode()
     encryp_b = hybrid_encrypt(pubkey, doc_b, keysize=keysize)
@@ -609,7 +801,7 @@ def doc_hybrid_encrypt_to_b64(pubkey: Union[bytes, str, RSA.RsaKey],
     return encryp_b64str
 
 
-def doc_hybrid_decrypt_from_b64(privkey: Union[bytes, str, RSA.RsaKey],
+def doc_hybrid_decrypt_from_b64(privkey: Union[bytes, str, rsa.RSAPrivateKey],
                                 encr_b64: str) -> Dict[Any, Any]:
     dt_json = hybrid_decrypt(privkey, urlsafe_b64decode(encr_b64.encode()))
     out: Dict[Any, Any] = json.loads(dt_json)
@@ -668,13 +860,13 @@ def ec_pubkey_to_hex(pubkey: ec.EllipticCurvePublicKey,
                      pubkey_format=PubkeyFormat.COMPRESSED) -> str:
     if pubkey_format == PubkeyFormat.COMPRESSED:
         return pubkey.public_bytes(
-            encoding=serialization.Encoding.X962,
-            format=serialization.PublicFormat.CompressedPoint).hex()
+            encoding=ser.Encoding.X962,
+            format=ser.PublicFormat.CompressedPoint).hex()
 
     else:
         pub_hex = pubkey.public_bytes(
-            encoding=serialization.Encoding.X962,
-            format=serialization.PublicFormat.UncompressedPoint).hex()
+            encoding=ser.Encoding.X962,
+            format=ser.PublicFormat.UncompressedPoint).hex()
 
         if pubkey_format == PubkeyFormat.UNCOMPRESSED:
             return pub_hex
@@ -699,7 +891,8 @@ def ec_pubkey_from_hex(pubkey_hex: str,
         ks = int(ceil((curve.key_size / 8)))
 
         pn = ec.EllipticCurvePublicNumbers(int.from_bytes(pub_raw[0:ks], "big"),
-                                           int.from_bytes(pub_raw[ks: ks * 2], "big"), curve)
+                                           int.from_bytes(pub_raw[ks: ks * 2], "big"),
+                                           curve)
         return pn.public_key()
 
     else:
@@ -747,9 +940,9 @@ def ed_privkey_generate() -> ed.Ed25519PrivateKey:
 
 
 def ed_privkey_to_hex(privkey: ed.Ed25519PrivateKey) -> str:
-    pb: bytes = privkey.private_bytes(encoding=serialization.Encoding.Raw,
-                                      format=serialization.PrivateFormat.Raw,
-                                      encryption_algorithm=serialization.NoEncryption())
+    pb: bytes = privkey.private_bytes(encoding=ser.Encoding.Raw,
+                                      format=ser.PrivateFormat.Raw,
+                                      encryption_algorithm=ser.NoEncryption())
     return pb.hex()
 
 
@@ -759,8 +952,8 @@ def ed_privkey_from_hex(privkey_hex: str) -> ed.Ed25519PrivateKey:
 
 
 def ed_pubkey_to_hex(pubkey: ed.Ed25519PublicKey) -> str:
-    return pubkey.public_bytes(serialization.Encoding.Raw,
-                               serialization.PublicFormat.Raw).hex()
+    return pubkey.public_bytes(ser.Encoding.Raw,
+                               ser.PublicFormat.Raw).hex()
 
 
 def ed_pubkey_from_hex(pubkey_hex: str) -> ed.Ed25519PublicKey:
@@ -780,7 +973,7 @@ def ed_verify(pubkey: ed.Ed25519PublicKey, data: bytes, signature: bytes) -> boo
 
 
 def doc_sign(privkey: Union[ec.EllipticCurvePrivateKey, ed.Ed25519PrivateKey],
-             msg: str) -> dict:
+             msg: str) -> Dict[str, str]:
     if isinstance(privkey, ec.EllipticCurvePrivateKey):
         sig = urlsafe_b64encode(ec_sign(privkey, msg.encode())).decode()
         curve = privkey.curve.name
@@ -800,13 +993,13 @@ def doc_sign(privkey: Union[ec.EllipticCurvePrivateKey, ed.Ed25519PrivateKey],
     return sig_doc
 
 
-def doc_verify(doc: dict) -> bool:
+def doc_verify(doc: Dict[str, str]) -> bool:
     sig = doc["sig"]
     msg = doc["msg"]
     pubkey_hex = doc["pubkey"]
     curve = doc["curve"]
     if curve == 'Curve25519':
-        pubkey = ed_pubkey_from_hex(pubkey_hex)
+        pubkey: Any = ed_pubkey_from_hex(pubkey_hex)
         return ed_verify(pubkey, msg.encode(), urlsafe_b64decode(sig))
     elif curve in _supported_curves:
         pubkey = ec_pubkey_from_hex(pubkey_hex, curve=_supported_curves[curve])
