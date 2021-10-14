@@ -64,10 +64,6 @@ _supported_curves = {
 
 class RSAKeyPair:
     """
-    Stores the public Key in ASN.1 DER format (SubjectPublicKeyInfo).
-
-    Stores the private Key in PKCS#8 format (PrivateKeyInfo), which is optional.
-
     The reason Private Keys are optional is because
     most client applications will be dealing with
     with different hosts/clients public keys/certificates
@@ -306,7 +302,7 @@ class RSAKeyPair:
         return kp
 
     def __str__(self) -> str:
-        return json.dumps(self.export_pem_data())
+        return json.dumps(self.export_pem_data(), indent=1)
 
     def __repr__(self):
         return json.dumps(self.export_to_components(), indent=1)
@@ -388,18 +384,18 @@ english : {self.aes_english}
             raise RuntimeError("Uninitialized AESKey")
 
 
-class PubkeyFormat(Enum):
+class EllipticPubkeyFormat(Enum):
     RAW = 1
     COMPRESSED = 2
     UNCOMPRESSED = 3
 
 
-def int_to_b64(x: int):
-    return urlsafe_b64encode(x.to_bytes((x.bit_length() + 7) // 8 or 1, "big")).decode()
+def int_to_b64(num: int):
+    return urlsafe_b64encode(num.to_bytes((num.bit_length() + 7) // 8 or 1, "big")).decode()
 
 
-def int_from_b64(x64: str):
-    return int.from_bytes(urlsafe_b64decode(x64.encode()), "big")
+def int_from_b64(num_b64: str):
+    return int.from_bytes(urlsafe_b64decode(num_b64.encode()), "big")
 
 
 def rsa_pubkey_to_components(pubkey: rsa.RSAPublicKey) -> Dict[str, str]:
@@ -751,9 +747,9 @@ def aes_decrypt(aeskey: bytes | AESKey, data_encrypted: bytes,
 
 
 def aes_encrypt_to_base64(aeskey: bytes | AESKey, bin_data: bytes) -> str:
-    encryp_b = aes_encrypt(aeskey, bin_data)
-    encryp_b64str = urlsafe_b64encode(encryp_b).decode()
-    return encryp_b64str
+    enc_data = aes_encrypt(aeskey, bin_data)
+    enc_data_b64 = urlsafe_b64encode(enc_data).decode()
+    return enc_data_b64
 
 
 def aes_decrypt_from_base64(aeskey: bytes | AESKey, encr_b64: str) -> bytes:
@@ -857,8 +853,8 @@ def ec_privkey_from_hex(privkey_hex: str,
 
 
 def ec_pubkey_to_hex(pubkey: ec.EllipticCurvePublicKey,
-                     pubkey_format=PubkeyFormat.COMPRESSED) -> str:
-    if pubkey_format == PubkeyFormat.COMPRESSED:
+                     pubkey_format=EllipticPubkeyFormat.COMPRESSED) -> str:
+    if pubkey_format == EllipticPubkeyFormat.COMPRESSED:
         return pubkey.public_bytes(
             encoding=ser.Encoding.X962,
             format=ser.PublicFormat.CompressedPoint).hex()
@@ -868,10 +864,10 @@ def ec_pubkey_to_hex(pubkey: ec.EllipticCurvePublicKey,
             encoding=ser.Encoding.X962,
             format=ser.PublicFormat.UncompressedPoint).hex()
 
-        if pubkey_format == PubkeyFormat.UNCOMPRESSED:
+        if pubkey_format == EllipticPubkeyFormat.UNCOMPRESSED:
             return pub_hex
 
-        elif pubkey_format == PubkeyFormat.RAW:
+        elif pubkey_format == EllipticPubkeyFormat.RAW:
             return pub_hex[2:]
 
         else:
@@ -880,12 +876,12 @@ def ec_pubkey_to_hex(pubkey: ec.EllipticCurvePublicKey,
 
 def ec_pubkey_from_hex(pubkey_hex: str,
                        curve=ec.SECP256K1(),
-                       pubkey_format=PubkeyFormat.COMPRESSED) -> ec.EllipticCurvePublicKey:
-    if pubkey_format in (PubkeyFormat.COMPRESSED, PubkeyFormat.UNCOMPRESSED):
+                       pubkey_format=EllipticPubkeyFormat.COMPRESSED) -> ec.EllipticCurvePublicKey:
+    if pubkey_format in (EllipticPubkeyFormat.COMPRESSED, EllipticPubkeyFormat.UNCOMPRESSED):
         return ec.EllipticCurvePublicKey.from_encoded_point(curve=curve,
                                                             data=bytes.fromhex(pubkey_hex))
 
-    elif pubkey_format == PubkeyFormat.RAW:
+    elif pubkey_format == EllipticPubkeyFormat.RAW:
         pub_raw = bytes.fromhex(pubkey_hex)
 
         ks = int(ceil((curve.key_size / 8)))
@@ -972,8 +968,8 @@ def ed_verify(pubkey: ed.Ed25519PublicKey, data: bytes, signature: bytes) -> boo
         return False
 
 
-def doc_sign(privkey: Union[ec.EllipticCurvePrivateKey, ed.Ed25519PrivateKey],
-             msg: str) -> Dict[str, str]:
+def curve_sign_doc(privkey: Union[ec.EllipticCurvePrivateKey, ed.Ed25519PrivateKey],
+                   msg: str) -> Dict[str, str]:
     if isinstance(privkey, ec.EllipticCurvePrivateKey):
         sig = urlsafe_b64encode(ec_sign(privkey, msg.encode())).decode()
         curve = privkey.curve.name
@@ -993,7 +989,7 @@ def doc_sign(privkey: Union[ec.EllipticCurvePrivateKey, ed.Ed25519PrivateKey],
     return sig_doc
 
 
-def doc_verify(doc: Dict[str, str]) -> bool:
+def curve_verify_doc(doc: Dict[str, str]) -> bool:
     sig = doc["sig"]
     msg = doc["msg"]
     pubkey_hex = doc["pubkey"]
