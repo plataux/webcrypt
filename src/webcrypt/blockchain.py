@@ -24,12 +24,14 @@ _curve = ec.SECP256K1()
 _nemo = Mnemonic("english")
 
 
-def hexstring_from_int(num: int, bits=256) -> str:
-    return num.to_bytes(int(bits / 8), "big").hex()
+def hexstring_from_int(num: int) -> str:
+    num_b = num.to_bytes((num.bit_length() + 7) // 8 or 1, "big")
+    return num_b.hex()
 
 
 def hexstring_to_int(hex_string: str) -> int:
-    return int(hex_string, 16)
+    num_b = bytes.fromhex(hex_string)
+    return int.from_bytes(num_b, "big")
 
 
 def eth_gen_privkey() -> str:
