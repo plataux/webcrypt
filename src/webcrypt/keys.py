@@ -22,8 +22,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import padding
 import cryptography.hazmat.primitives.asymmetric.ed25519 as ed
 
-from Cryptodome.Util.RFC1751 import key_to_english
-from Cryptodome.Util.RFC1751 import english_to_key
+from webcrypt.rfc1751 import key_to_english, english_to_key
 
 from passlib.context import CryptContext
 
