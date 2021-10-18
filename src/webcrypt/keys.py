@@ -13,7 +13,7 @@ session Keys.
 from __future__ import annotations
 
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.exceptions import InvalidSignature
@@ -23,6 +23,8 @@ from cryptography.hazmat.primitives.asymmetric import padding
 import cryptography.hazmat.primitives.asymmetric.ed25519 as ed
 
 from webcrypt.rfc1751 import key_to_english, english_to_key
+
+from webcrypt.convert import int_from_b64, int_to_b64
 
 from passlib.context import CryptContext
 
@@ -59,6 +61,17 @@ _supported_curves = {
     "secp384r1": ec.SECP384R1(),
     "secp521r1": ec.SECP521R1(),
 }
+
+
+class EllipticPubkeyFormat(Enum):
+    RAW = 1
+    COMPRESSED = 2
+    UNCOMPRESSED = 3
+
+
+class RSASignPadding(Enum):
+    PSS = 1
+    PKCS1v15 = 2
 
 
 class RSAKeyPair:
@@ -249,57 +262,6 @@ class RSAKeyPair:
             kp.privkey = None
         return kp
 
-    def export_jwk(self, alg='RS256') -> Dict[str, Dict[str, str]]:
-        comps = self.export_to_components()
-
-        jwk_doc = {}
-
-        jwk_doc['pubkey'] = {
-            'kty': 'RSA',
-            'alg': alg,
-            **comps['pubkey']
-        }
-
-        if 'privkey' in comps:
-            priv_comp = comps['privkey']
-            jwk_doc['privkey'] = {
-                'kty': 'RSA',
-                'alg': alg,
-                'e': priv_comp['e'],
-                'n': priv_comp['n'],
-                'd': priv_comp['d'],
-                'p': priv_comp['p'],
-                'q': priv_comp['q'],
-                'dp': priv_comp['dmp1'],
-                'dq': priv_comp['dmq1'],
-                'qi': priv_comp['iqmp']
-            }
-
-        return jwk_doc
-
-    @classmethod
-    def import_jwk(cls, jwk_pair: Dict[str, Dict[str, str]]) -> 'RSAKeyPair':
-
-        pubkey = rsa_pubkey_from_components(jwk_pair['pubkey'])
-
-        if 'privkey' in jwk_pair:
-            priv_comp = jwk_pair['privkey'].copy()
-
-            priv_comp['dmp1'] = priv_comp['dp']
-            priv_comp['dmq1'] = priv_comp['dq']
-            priv_comp['iqmp'] = priv_comp['qi']
-
-            del priv_comp['dp'], priv_comp['dq'], priv_comp['qi']
-
-            privkey: Optional[rsa.RSAPrivateKey] = rsa_privkey_from_components(priv_comp)
-        else:
-            privkey = None
-
-        kp: "RSAKeyPair" = cls(None)
-        kp.pubkey = pubkey
-        kp.privkey = privkey
-        return kp
-
     def __str__(self) -> str:
         return json.dumps(self.export_pem_data(), indent=1)
 
@@ -381,20 +343,6 @@ english : {self.aes_english}
             return aes_decrypt(self.key, data_encrypted, auth_data)
         else:
             raise RuntimeError("Uninitialized AESKey")
-
-
-class EllipticPubkeyFormat(Enum):
-    RAW = 1
-    COMPRESSED = 2
-    UNCOMPRESSED = 3
-
-
-def int_to_b64(num: int):
-    return urlsafe_b64encode(num.to_bytes((num.bit_length() + 7) // 8 or 1, "big")).decode()
-
-
-def int_from_b64(num_b64: str):
-    return int.from_bytes(urlsafe_b64decode(num_b64.encode()), "big")
 
 
 def rsa_pubkey_to_components(pubkey: rsa.RSAPublicKey) -> Dict[str, str]:
@@ -502,41 +450,54 @@ def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
 
 
 def rsa_sign(privkey: Union[bytes, str, rsa.RSAPrivateKey],
-             message: Union[str, bytes]) -> bytes:
-    if not isinstance(message, (str, bytes)):
-        raise ValueError("message can only be str of bytes")
-
-    if isinstance(message, str):
-        message = message.encode()
+             data: Union[str, bytes],
+             hash_alg=hashes.SHA256(),
+             sign_padding=RSASignPadding.PSS) -> bytes:
+    if isinstance(data, str):
+        data = data.encode()
 
     if isinstance(privkey, (bytes, str)):
         privkey = rsa_privkey_from_pem(privkey)
 
-    signature = privkey.sign(message,
-                             padding.PSS(
-                                 mgf=padding.MGF1(hashes.SHA256()),
-                                 salt_length=padding.PSS.MAX_LENGTH),
-                             hashes.SHA256())
+    if sign_padding == RSASignPadding.PSS:
+        signature = privkey.sign(data,
+                                 padding.PSS(
+                                     mgf=padding.MGF1(hash_alg),
+                                     salt_length=hash_alg.digest_size),
+                                 hash_alg)
+    elif sign_padding == RSASignPadding.PKCS1v15:
+        signature = privkey.sign(data,
+                                 padding.PKCS1v15(),
+                                 hash_alg)
+    else:
+        raise ValueError("Invalid RSA Signature Padding")
+
     return signature
 
 
-def rsa_verify(pubkey: Union[bytes, str, rsa.RSAPublicKey], message: Union[str, bytes],
-               signature: bytes) -> bool:
-    if not isinstance(message, (str, bytes)):
+def rsa_verify(pubkey: Union[bytes, str, rsa.RSAPublicKey],
+               data: Union[str, bytes],
+               signature: bytes,
+               hash_alg=hashes.SHA256(),
+               sign_padding=RSASignPadding.PSS) -> bool:
+    if not isinstance(data, (str, bytes)):
         raise ValueError("message can only be str or bytes")
 
-    if isinstance(message, str):
-        message = message.encode()
+    if isinstance(data, str):
+        data = data.encode()
 
     if isinstance(pubkey, (bytes, str)):
         pubkey = rsa_pubkey_from_pem(pubkey)
 
+    if sign_padding == RSASignPadding.PSS:
+        _padding = padding.PSS(
+            mgf=padding.MGF1(algorithm=hash_alg),
+            salt_length=hash_alg.digest_size)
+    else:
+        _padding = padding.PKCS1v15()
+
     try:
-        pubkey.verify(signature, message,
-                      padding.PSS(
-                          mgf=padding.MGF1(hashes.SHA256()),
-                          salt_length=padding.PSS.MAX_LENGTH),
-                      hashes.SHA256())
+        pubkey.verify(signature, data, _padding, hash_alg)
         return True
     except InvalidSignature:
         return False
@@ -875,7 +836,8 @@ def ec_pubkey_to_hex(pubkey: ec.EllipticCurvePublicKey,
 
 def ec_pubkey_from_hex(pubkey_hex: str,
                        curve=ec.SECP256K1(),
-                       pubkey_format=EllipticPubkeyFormat.COMPRESSED) -> ec.EllipticCurvePublicKey:
+                       pubkey_format=EllipticPubkeyFormat.COMPRESSED) -> \
+        ec.EllipticCurvePublicKey:
     if pubkey_format in (EllipticPubkeyFormat.COMPRESSED, EllipticPubkeyFormat.UNCOMPRESSED):
         return ec.EllipticCurvePublicKey.from_encoded_point(curve=curve,
                                                             data=bytes.fromhex(pubkey_hex))
@@ -913,18 +875,24 @@ def ec_dh_derive_key(privkey: ec.EllipticCurvePrivateKey, pubkey: ec.EllipticCur
     return derived_key
 
 
-def ec_sign(privkey: ec.EllipticCurvePrivateKey, data: bytes) -> bytes:
-    signature = privkey.sign(
-        data, ec.ECDSA(hashes.SHA256())
-    )
+def ec_sign(privkey: ec.EllipticCurvePrivateKey,
+            data: bytes | str,
+            hash_alg=hashes.SHA256()) -> bytes:
+    if isinstance(data, str):
+        data = data.encode()
+
+    signature = privkey.sign(data, ec.ECDSA(hash_alg))
     return signature
 
 
 def ec_verify(pubkey: ec.EllipticCurvePublicKey,
-              data: bytes,
-              signature: bytes) -> bool:
+              data: bytes | str,
+              signature: bytes, hash_alg=hashes.SHA256()) -> bool:
+    if isinstance(data, str):
+        data = data.encode()
+
     try:
-        pubkey.verify(signature, data, ec.ECDSA(hashes.SHA256()))
+        pubkey.verify(signature, data, ec.ECDSA(hash_alg))
         return True
     except InvalidSignature:
         return False
@@ -1003,3 +971,34 @@ def curve_verify_doc(doc: Dict[str, str]) -> bool:
         raise ValueError(
             "Only these curves supported: Curve25519, "
             "secp256k1, secp256r1, secp384r1, secp521r1")
+
+
+def hmac_genkey(hash_alg: hashes.HashAlgorithm = hashes.SHA512()):
+    return os.urandom(hash_alg.digest_size)
+
+
+def hmac_sign(key: bytes, data: bytes | str, hash_alg=hashes.SHA256()) -> bytes:
+    h = hmac.HMAC(key, hash_alg)
+
+    if isinstance(data, str):
+        data = data.encode()
+
+    h.update(data)
+
+    return h.finalize()
+
+
+def hmac_verify(key: bytes, data: bytes | str, signature: bytes,
+                hash_alg=hashes.SHA256()) -> bool:
+    h = hmac.HMAC(key, hash_alg)
+
+    if isinstance(data, str):
+        data = data.encode()
+
+    h.update(data)
+
+    try:
+        h.verify(signature)
+        return True
+    except InvalidSignature:
+        return False

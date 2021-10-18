@@ -65,7 +65,7 @@ def key_to_english(key):
 
     Example::
 
-        >>> from Cryptodome.Util.RFC1751 import key_to_english
+        >>> from webcrypt.rfc1751 import key_to_english
         >>> key_to_english(b'66666666')
         'RAM LOIS GOAD CREW CARE HIT'
 
@@ -100,7 +100,7 @@ def english_to_key(s):
 
     Example::
 
-        >>> from Cryptodome.Util.RFC1751 import english_to_key
+        >>> from webcrypt.rfc1751 import english_to_key
         >>> english_to_key('RAM LOIS GOAD CREW CARE HIT')
         b'66666666'
 
