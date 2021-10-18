@@ -31,13 +31,6 @@ def test_RSAKeyPair_export_import(keysize, tmpdir):
     # ensure that public key is in the PEM Format
     assert b'-----BEGIN PUBLIC KEY-----\n' in pem['pubkey']
 
-    jx = kp.export_jwk()
-    assert isinstance(jx, dict)
-
-    # Export and Import of JWK
-    kp2 = wk.RSAKeyPair.import_jwk(kp.export_jwk())
-    assert repr(kp) == repr(kp2)
-
     # Export and Import of PEM Data
     kp2 = wk.RSAKeyPair.import_pem_data(kp.export_pem_data())
     assert repr(kp) == repr(kp2)
@@ -150,6 +143,3 @@ def test_hybrid_doc_encrypt_decrypt(keysize, rsa_keys):
         doc_enc = wk.doc_hybrid_encrypt_to_b64(rsa_k.pubkey, doc, keysize=keysize)
         doc_dec = wk.doc_hybrid_decrypt_from_b64(rsa_k.privkey, doc_enc)
         assert doc_dec == doc
-
-
-
