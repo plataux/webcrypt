@@ -182,6 +182,7 @@ class JWS:
         }
 
         if self._kty == 'oct':
+            jwk_dict['key_ops'] = ['sign', 'verify']
             jwk_dict['k'] = conv.bytes_to_b64(self._hmac_key)
 
         elif self._kty == 'RSA':
@@ -231,6 +232,11 @@ class JWS:
 
     @classmethod
     def from_jwk(cls, jwk: Dict[str, Any]):
+
+        if 'use' in jwk and (_use := jwk['use']) != 'sig':
+            raise ValueError(
+                f"not declare to be use for encryption/decryption purposes: {_use}")
+
         if not all(item in jwk for item in ('kty', 'alg')):
             raise ValueError("Invalid JWK format")
 
@@ -280,6 +286,20 @@ class JWS:
         elif kty == 'EC':
             if alg_name not in JWS._EC:
                 raise ValueError("JWS Algorithm not compatible with this key")
+
+            _crv_to_alg = {
+                'P-256': 'ES256',
+                'P-384': 'ES384',
+                'P-521': 'ES512',
+            }
+
+            if 'crv' in jwk:
+                if (_crv := jwk['crv']) not in _crv_to_alg:
+                    raise ValueError(f"Unrecognized/Unsupported EC Curve {_crv}")
+
+                elif _crv_to_alg[_crv] != alg_name:
+                    raise ValueError(
+                        f"EC crv and JWS alg incompatible: {_crv} with {alg_name}")
 
             key_curve = alg.value['curve']
 

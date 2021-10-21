@@ -11,6 +11,7 @@ import os
 import logging
 
 import secrets
+from random import choice
 
 from cryptography.hazmat.primitives import hashes
 
@@ -423,6 +424,11 @@ class JWE:
 
     @classmethod
     def from_jwk(cls, jwk: Dict[str, Any]):
+
+        if 'use' in jwk and (_use := jwk['use']) != 'enc':
+            raise ValueError(
+                f"not declare to be use for encryption/decryption purposes: {_use}")
+
         if not all(item in jwk for item in ('kty', 'alg', 'enc')):
             raise ValueError("Invalid JWK format")
 
@@ -430,7 +436,7 @@ class JWE:
         enc_map = {_ja.value: _ja for _ja in list(JWE.Encryption)}
 
         alg_name = jwk['alg']
-        enc_name = jwk.get('enc')
+        enc_name = jwk['enc']
 
         if alg_name not in algo_map:
             raise ValueError(f"Invalid JWK alg: {alg_name}")
@@ -489,10 +495,10 @@ class JWE:
                 'P-521': SECP521R1(),
             }
 
-            if jwk['crv'] not in _crv_to_curve:
-                raise ValueError(f"invalid EC curve: {jwk['crv']}")
+            if (_crv := jwk['crv']) not in _crv_to_curve:
+                raise ValueError(f"invalid EC curve: {_crv}")
 
-            key_curve = _crv_to_curve[jwk['crv']]
+            key_curve = _crv_to_curve[_crv]
 
             if all(comp in jwk for comp in ('x', 'y', 'd')):
                 ec_key = ec.derive_private_key(
@@ -510,8 +516,8 @@ class JWE:
                 raise ValueError("Invalid HMAC JWK")
 
     def to_jwk(self) -> Dict[str, Any]:
-
         jwk_dict = {
+            'use': 'enc',
             'kid': self._kid,
             'kty': self._kty,
             'alg': self._alg,
@@ -525,7 +531,7 @@ class JWE:
 
                 jwk_dict = {
                     **jwk_dict,
-                    "key_ops": ["encrypt", "decrypt"],
+                    "key_ops": ["wrapKey", "unwrapKey"],
                     'e': conv.int_to_b64(pub_num.e),
                     'n': conv.int_to_b64(pub_num.n),
                     'd': conv.int_to_b64(priv_num.d),
@@ -541,23 +547,51 @@ class JWE:
 
                 jwk_dict = {
                     **jwk_dict,
-                    "key_ops": ["encrypt", "decrypt"],
+                    "key_ops": ["wrapKey"],
                     'e': conv.int_to_b64(pub_num.e),
                     'n': conv.int_to_b64(pub_num.n),
                 }
 
         elif self._kty == 'oct':
-            jwk_dict['key_ops'] = ["encrypt", "decrypt"]
+
+            if self._alg == 'dir':
+                jwk_dict['key_ops'] = ["encrypt", "decrypt"]
+            elif self._alg in JWE._AESKW + JWE._AESGSMKW:
+                jwk_dict['key_ops'] = ["wrapKey", "unwrapKey"]
+
             jwk_dict['k'] = conv.bytes_to_b64(self._key)
 
         elif self._kty == 'EC':
-            jwk_dict['key_ops'] = ["derive", "encrypt", "decrypt"]
+            jwk_dict['key_ops'] = ["deriveBits", "deriveKey"]
             jwk_dict['crv'] = self._crv
             jwk_dict['x'] = self._ec_x
             jwk_dict['y'] = self._ec_y
             jwk_dict['d'] = self._ec_d
 
         return jwk_dict
+
+    @classmethod
+    def random_jwe(cls) -> "JWE":
+        alg_list = list(JWE.Algorithm)
+        enc_list = list(JWE.Encryption)
+
+        alg_list.remove(JWE.Algorithm.ECDH_ES)
+        alg_list.remove(JWE.Algorithm.ECDH_ES_A128KW)
+        alg_list.remove(JWE.Algorithm.ECDH_ES_A192KW)
+        alg_list.remove(JWE.Algorithm.ECDH_ES_A256KW)
+
+        rand_alg: JWE.Algorithm = choice(alg_list)
+        rand_enc = choice(enc_list)
+
+        if (alg := rand_alg.value) == 'dir':
+            rand_key = os.urandom(JWE._aes_alg_size[rand_enc.value])
+        elif alg in JWE._RSA:
+            _m = [2, 3, 4]
+            rand_key = rsa.generate_private_key(65537, 1024 * choice(_m))
+        else:
+            rand_key = os.urandom(JWE._aes_alg_size[alg])
+
+        return cls(rand_alg, rand_enc, rand_key)
 
     @property
     def key(self) -> jwe_kty:
@@ -718,7 +752,10 @@ class JWE:
             ziptext = plaintext
 
         # will be used as the associated data
-        hx = {**extra_header, **header.dict(exclude_none=True)}
+        if extra_header is not None:
+            hx = {**extra_header, **header.dict(exclude_none=True)}
+        else:
+            hx = header.dict(exclude_none=True)
         header_b64 = conv.doc_to_b64(hx)
         iv, ciphertext, tag = JWE.gcm_encrypt(self._key, header_b64.encode(), ziptext)
 
@@ -734,7 +771,7 @@ class JWE:
         return plaintext
 
     def _encrypt_aeskw(self, plaintext: bytes, compress=True,
-                       extra_header=Optional[Dict[str, Any]]) -> str:
+                       extra_header: Optional[Dict[str, Any]] = None) -> str:
         header = self._jwe_header.copy()
         header.zip = 'DEF' if compress else None
 
@@ -746,7 +783,11 @@ class JWE:
         cek = os.urandom(self._cek_size)
 
         # will be used as the associated data
-        hx = {**extra_header, **header.dict(exclude_none=True)}
+        if extra_header is not None:
+            hx = {**extra_header, **header.dict(exclude_none=True)}
+        else:
+            hx = header.dict(exclude_none=True)
+
         header_b64 = conv.doc_to_b64(hx)
 
         iv, ciphertext, tag = JWE.gcm_encrypt(cek, header_b64.encode(), ziptext)
@@ -784,7 +825,10 @@ class JWE:
         header.iv, header.tag = conv.bytes_to_b64(cek_iv), conv.bytes_to_b64(cek_tag)
 
         # will be used as the associated data
-        hx = {**extra_header, **header.dict(exclude_none=True)}
+        if extra_header is not None:
+            hx = {**extra_header, **header.dict(exclude_none=True)}
+        else:
+            hx = header.dict(exclude_none=True)
         header_b64 = conv.doc_to_b64(hx)
 
         iv, ciphertext, tag = JWE.gcm_encrypt(cek, header_b64.encode(), ziptext)
@@ -828,7 +872,10 @@ class JWE:
             JWE._RSA_Padding[self._alg]
         )
 
-        hx = {**extra_header, **header.dict(exclude_none=True)}
+        if extra_header is not None:
+            hx = {**extra_header, **header.dict(exclude_none=True)}
+        else:
+            hx = header.dict(exclude_none=True)
         header_b64 = conv.doc_to_b64(hx)
 
         iv, ciphertext, tag = JWE.gcm_encrypt(cek, header_b64.encode(), ziptext)
@@ -880,7 +927,10 @@ class JWE:
             cek_wrapped = aes_key_wrap(self._key, cek)
 
         # will be used as the associated data
-        hx = {**extra_header, **header.dict(exclude_none=True)}
+        if extra_header is not None:
+            hx = {**extra_header, **header.dict(exclude_none=True)}
+        else:
+            hx = header.dict(exclude_none=True)
         header_b64 = conv.doc_to_b64(hx)
 
         iv, ciphertext, tag = JWE.gcm_encrypt(cek, header_b64.encode(), ziptext)

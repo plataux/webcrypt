@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any, TypeVar, Type
 from pydantic import BaseModel, Field
+
+import os
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from uuid import uuid4
 
@@ -15,9 +19,9 @@ from webcrypt.jwe import JWE
 
 from collections import defaultdict
 
-import webcrypt.exceptions as tex  # Token Exceptions
+from hashlib import sha256
 
-T = TypeVar('T')
+import webcrypt.exceptions as tex  # Token Exceptions
 
 
 def dt_offset(days=0, hours=0, minutes=0, seconds=60) -> datetime:
@@ -113,6 +117,9 @@ class TokenOptions(BaseModel):
     leeway: int = 0
 
 
+T = TypeVar('T', bound=Token)
+
+
 class JWT:
     """
     Encoder and decoder of JWT Tokens.
@@ -126,45 +133,94 @@ class JWT:
 
     """
     __slots__ = ('_options',
-                 '_jws_ks', '_jws_kid_lookup', '_jws_alg_lookup',
-                 '_jwe_ks', '_jwe_kid_lookup', '_jwe_alg_lookup')
+                 '_sign_ks', '_sign_kid_lookup', '_sign_alg_lookup',
+                 '_encrypt_ks', '_encrypt_kid_lookup', '_encrypt_alg_lookup')
 
     def __init__(self,
                  jws: Optional[JWS | List[JWS]] = None,
                  jwe: Optional[JWE | List[JWE]] = None,
                  options: Optional[TokenOptions] = None):
         if jws is None:
-            # hkey = wk.hmac_genkey(SHA256())
-            # self._jwk = JWK((hkey, None))
-            self._jws_ks = [JWS.random_jws()]
+            self._sign_ks: List[JWS] = [JWS.random_jws()]
         elif isinstance(jws, JWS):
-            self._jws_ks = [jws]
+            self._sign_ks = [jws]
         elif isinstance(jws, list):
-            self._jws_ks = list(jws)
+            self._sign_ks = list(jws)
+        else:
+            raise ValueError("Unexected JWS Value")
 
-        self._jws_kid_lookup = {x.kid: x for x in self._jws_ks}
-        self._jws_alg_lookup = defaultdict(list)
+        self._sign_kid_lookup = {x.kid: x for x in self._sign_ks}
+        self._sign_alg_lookup = defaultdict(list)
 
-        for jwk in self._jws_ks:
-            self._jws_alg_lookup[jwk.alg].append(jwk)
+        for jwk in self._sign_ks:
+            self._sign_alg_lookup[jwk.alg].append(jwk)
 
         if jwe is None:
             # hkey = wk.hmac_genkey(SHA256())
             # self._jwk = JWK((hkey, None))
-            self._jwe_ks = [JWE()]
+            self._encrypt_ks = [JWE.random_jwe()]
         elif isinstance(jwe, JWE):
-            self._jwe_ks = [jwe]
+            self._encrypt_ks = [jwe]
         elif isinstance(jwe, list):
-            self._jwe_ks = list(jwe)
+            self._encrypt_ks = list(jwe)
 
-        self._jwe_kid_lookup = {x.kid: x for x in self._jwe_ks}
-        self._jwe_alg_lookup = defaultdict(list)
+        self._encrypt_kid_lookup = {x.kid: x for x in self._encrypt_ks}
+        self._encrypt_alg_lookup = defaultdict(list)
 
-        for jwk in self._jwe_ks:
-            self._jwe_alg_lookup[jwk.alg].append(jwk)
+        for jwk in self._encrypt_ks:
+            self._encrypt_alg_lookup[jwk.alg].append(jwk)
 
         if options is None:
             self._options = TokenOptions()
+
+    def to_jwks(self, passphrase: Optional[str] = None) -> str:
+        ks = []
+        jwks = {'keys': ks}
+
+        for item in self._sign_ks:
+            ks.append(item.to_jwk())
+
+        for item in self._encrypt_ks:
+            ks.append(item.to_jwk())
+
+        jwks_json = json.dumps(jwks, indent=2)
+
+        if passphrase is None:
+            return jwks_json
+        else:
+            key = sha256(passphrase.encode()).digest()[:16]
+            nonce = os.urandom(12)
+            aesgcm = AESGCM(key)
+            ciphertext = aesgcm.encrypt(nonce, jwks_json.encode(), b'')
+            jwks_enc = nonce + ciphertext
+            return conv.bytes_to_b64(jwks_enc)
+
+    @classmethod
+    def from_jwks(cls, jwks: str, passphrase: Optional[str] = None) -> "JWT":
+        if passphrase is None:
+            try:
+                jwks_dict: Dict[str, Any] = json.loads(jwks)
+            except Exception as ex:
+                raise ValueError(f"Invalid JWKS string: either corrupted, or encrypted: {ex}")
+        else:
+            try:
+                jwks_enc = conv.bytes_from_b64(jwks)
+                key = sha256(passphrase.encode()).digest()[:16]
+                aesgcm = AESGCM(key)
+                jwks_json: bytes = aesgcm.decrypt(jwks_enc[:12], jwks_enc[12:], b'')
+                jwks_dict = json.loads(jwks_json)
+            except Exception:
+                raise ValueError(f"Could Not Decrypt/Parse JWKS, passphrase maybe invalid")
+
+        jws, jwe = [], []
+
+        for item in jwks_dict['keys']:
+            if (_use := item['use']) == 'sig':
+                jws.append(JWS.from_jwk(item))
+            elif _use == 'enc':
+                jwe.append(JWE.from_jwk(item))
+
+        return cls(jws, jwe)
 
     def sign(self, token: Token,
              access_token: Optional[str] = None,
@@ -172,9 +228,9 @@ class JWT:
              kid: Optional[str] = None) -> str:
 
         if kid is not None:
-            jwk: JWS = self._jws_kid_lookup[kid]
+            jwk: JWS = self._sign_kid_lookup[kid]
         else:
-            jwk: JWS = choice(self._jws_ks)
+            jwk: JWS = choice(self._sign_ks)
 
         if access_token is not None:
             token.at_hash = self.at_hash(access_token, jwk)
@@ -202,7 +258,7 @@ class JWT:
         :raises
         """
 
-        jwk = self._jws_kid_lookup[JWS.decode_header(token)['kid']]
+        jwk = self._sign_kid_lookup[JWS.decode_header(token)['kid']]
 
         # validate signature and decode token
         payload: Dict[str, Any] = conv.doc_from_bytes(jwk.verify(token))
@@ -213,6 +269,21 @@ class JWT:
         self._verify_at_hash(ptoken, access_token, jwk)
 
         return ptoken
+
+    def encrypt(self, token: Token,
+                extra_header: Optional[Dict[str, Any]] = None,
+                kid: Optional[str] = None) -> str:
+        if kid is not None:
+            jwk: JWE = self._encrypt_kid_lookup[kid]
+        else:
+            jwk: JWE = choice(self._encrypt_ks)
+        return jwk.encrypt(token.json(exclude_none=True).encode(), extra_header=extra_header)
+
+    def decrypt(self,
+                token: str,
+                TokenClass: Type[T] = Token) -> T:
+        jwk: JWE = self._encrypt_kid_lookup[JWS.decode_header(token)['kid']]
+        return TokenClass(**conv.doc_from_bytes(jwk.decrypt(token)))
 
     def _verify_at_hash(self, token: Token, access_token: str, jwk):
         try:
