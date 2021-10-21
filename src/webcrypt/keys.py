@@ -69,9 +69,15 @@ class EllipticPubkeyFormat(Enum):
     UNCOMPRESSED = 3
 
 
-class RSASignPadding(Enum):
+class RSASignAlgorithm(Enum):
     PSS = 1
     PKCS1v15 = 2
+
+
+class RSAEncryptAlg(Enum):
+    RSA1_5 = 1
+    RSA_OAEP = 2
+    RSA_OAEP_256 = 3
 
 
 class RSAKeyPair:
@@ -345,6 +351,21 @@ english : {self.aes_english}
             raise RuntimeError("Uninitialized AESKey")
 
 
+_rsa_enc_pad = {
+    RSAEncryptAlg.RSA1_5: padding.PKCS1v15(),
+    RSAEncryptAlg.RSA_OAEP: padding.OAEP(
+        mgf=padding.MGF1(algorithm=hashes.SHA1()),
+        algorithm=hashes.SHA1(),
+        label=None
+    ),
+    RSAEncryptAlg.RSA_OAEP_256: padding.OAEP(
+        mgf=padding.MGF1(algorithm=hashes.SHA256()),
+        algorithm=hashes.SHA256(),
+        label=None
+    )
+}
+
+
 def rsa_pubkey_to_components(pubkey: rsa.RSAPublicKey) -> Dict[str, str]:
     pub_num = pubkey.public_numbers()
     components = {
@@ -452,20 +473,22 @@ def rsa_genkeypair(keysize: int = 2048) -> RSAKeyPair:
 def rsa_sign(privkey: Union[bytes, str, rsa.RSAPrivateKey],
              data: Union[str, bytes],
              hash_alg=hashes.SHA256(),
-             sign_padding=RSASignPadding.PSS) -> bytes:
+             sign_padding=RSASignAlgorithm.PSS, max_pss_salt=False) -> bytes:
     if isinstance(data, str):
         data = data.encode()
 
     if isinstance(privkey, (bytes, str)):
         privkey = rsa_privkey_from_pem(privkey)
 
-    if sign_padding == RSASignPadding.PSS:
+    salt_len = padding.PSS.MAX_LENGTH if max_pss_salt else hash_alg.digest_size
+
+    if sign_padding == RSASignAlgorithm.PSS:
         signature = privkey.sign(data,
                                  padding.PSS(
                                      mgf=padding.MGF1(hash_alg),
-                                     salt_length=hash_alg.digest_size),
+                                     salt_length=salt_len),
                                  hash_alg)
-    elif sign_padding == RSASignPadding.PKCS1v15:
+    elif sign_padding == RSASignAlgorithm.PKCS1v15:
         signature = privkey.sign(data,
                                  padding.PKCS1v15(),
                                  hash_alg)
@@ -479,7 +502,7 @@ def rsa_verify(pubkey: Union[bytes, str, rsa.RSAPublicKey],
                data: Union[str, bytes],
                signature: bytes,
                hash_alg=hashes.SHA256(),
-               sign_padding=RSASignPadding.PSS) -> bool:
+               sign_padding=RSASignAlgorithm.PSS, max_pss_salt=False) -> bool:
     if not isinstance(data, (str, bytes)):
         raise ValueError("message can only be str or bytes")
 
@@ -489,13 +512,13 @@ def rsa_verify(pubkey: Union[bytes, str, rsa.RSAPublicKey],
     if isinstance(pubkey, (bytes, str)):
         pubkey = rsa_pubkey_from_pem(pubkey)
 
-    if sign_padding == RSASignPadding.PSS:
+    if sign_padding == RSASignAlgorithm.PSS:
+        salt_len = padding.PSS.MAX_LENGTH if max_pss_salt else hash_alg.digest_size
         _padding = padding.PSS(
             mgf=padding.MGF1(algorithm=hash_alg),
-            salt_length=hash_alg.digest_size)
+            salt_length=salt_len)
     else:
         _padding = padding.PKCS1v15()
-
     try:
         pubkey.verify(signature, data, _padding, hash_alg)
         return True
@@ -503,7 +526,9 @@ def rsa_verify(pubkey: Union[bytes, str, rsa.RSAPublicKey],
         return False
 
 
-def rsa_encrypt(pubkey: Union[bytes, str, rsa.RSAPublicKey], message: bytes) -> bytes:
+def rsa_encrypt(pubkey: Union[bytes, str, rsa.RSAPublicKey],
+                message: bytes,
+                encryption_alg: RSAEncryptAlg = RSAEncryptAlg.RSA_OAEP) -> bytes:
     """
 
     In general, encryption with RSA Public Keys is slow, and the message size is limited.
@@ -511,15 +536,9 @@ def rsa_encrypt(pubkey: Union[bytes, str, rsa.RSAPublicKey], message: bytes) -> 
     Any encrypted Messages that have been previously stored by a bad actor can now be
     deciphered.
 
-    Here are the limits:
-
-    * 1024 RSA - 62  bytes
-    * 2048 RSA - 190 bytes
-    * 3072 RSA - 318 bytes
-    * 4096 RSA - 446 bytes
-
     The preferred strategy is a hybrid of RSA and Session AES Key encryption.
 
+    :param encryption_alg:
     :param pubkey:
     :param message:
     :return: Encrypted Message in bytes, of fixed size
@@ -529,27 +548,20 @@ def rsa_encrypt(pubkey: Union[bytes, str, rsa.RSAPublicKey], message: bytes) -> 
 
     ciphertext = pubkey.encrypt(
         message,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
+        _rsa_enc_pad[encryption_alg]
     )
     return ciphertext
 
 
 def rsa_decrypt(privkey: Union[bytes, str, rsa.RSAPrivateKey],
-                message_encrypted: bytes) -> bytes:
+                message_encrypted: bytes,
+                encryption_alg: RSAEncryptAlg = RSAEncryptAlg.RSA_OAEP) -> bytes:
     if isinstance(privkey, (bytes, str)):
         privkey = rsa_privkey_from_pem(privkey)
 
     plaintext = privkey.decrypt(
         message_encrypted,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
+        _rsa_enc_pad[encryption_alg]
     )
 
     return plaintext

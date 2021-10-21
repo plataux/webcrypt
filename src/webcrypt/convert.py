@@ -63,10 +63,10 @@ def ec_sig_der_from_raw_b64(sig_raw_b64: str) -> bytes:
     return ec_sig_der_from_raw(sig_raw)
 
 
-def doc_to_b64(doc: Dict[str, str]) -> str:
+def doc_to_b64(doc: Dict[str, str], sort_keys: bool = False) -> str:
     dt = json.dumps(
         doc,
-        sort_keys=False,
+        sort_keys=sort_keys,
         separators=(",", ":"),
     ).encode("utf-8")
     return bytes_to_b64(dt)
@@ -74,3 +74,16 @@ def doc_to_b64(doc: Dict[str, str]) -> str:
 
 def doc_from_b64(doc_b64: str) -> Dict[str, str]:
     return json.loads(bytes_from_b64(doc_b64))
+
+
+def doc_to_bytes(doc: Dict[Any, Any], sort_keys: bool = False) -> bytes:
+    dt = json.dumps(
+        doc,
+        sort_keys=sort_keys,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return dt
+
+
+def doc_from_bytes(doc: bytes) -> Dict[Any, Any]:
+    return json.loads(doc)
