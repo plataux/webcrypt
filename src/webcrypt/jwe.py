@@ -620,7 +620,7 @@ class JWE:
         return self._alg
 
     def encrypt(self, plaintext: bytes, compress=False,
-                extra_header=Optional[Dict[str, Any]]):
+                extra_header: Optional[Dict[str, Any]] = None):
         if self._alg == 'dir':
             return self._encrypt_dir(plaintext, compress, extra_header)
 
@@ -742,7 +742,7 @@ class JWE:
         self._apv = px.apv
 
     def _encrypt_dir(self, plaintext: bytes, compress=True,
-                     extra_header=Optional[Dict[str, Any]]) -> str:
+                     extra_header: Optional[Dict[str, Any]] = None) -> str:
         header = self._jwe_header.copy()
         header.zip = 'DEF' if compress else None
 
@@ -810,7 +810,7 @@ class JWE:
         return plaintext
 
     def _encrypt_gcmkw(self, plaintext: bytes, compress=True,
-                       extra_header=Optional[Dict[str, Any]]) -> str:
+                       extra_header: Optional[Dict[str, Any]] = None) -> str:
         header: JWE_Header = self._jwe_header.copy()
         header.zip = 'DEF' if compress else None
 
@@ -856,7 +856,7 @@ class JWE:
         return plaintext
 
     def _encrypt_rsa(self, plaintext: bytes, compress=True,
-                     extra_header=Optional[Dict[str, Any]]):
+                     extra_header: Optional[Dict[str, Any]] = None):
         header = self._jwe_header.copy()
         header.zip = 'DEF' if compress else None
 
@@ -904,7 +904,7 @@ class JWE:
         return plaintext
 
     def _encrypt_ecdh(self, plaintext: bytes, compress=True,
-                      extra_header=Optional[Dict[str, Any]]) -> str:
+                      extra_header: Optional[Dict[str, Any]] = None) -> str:
         if None in (self._key, self._apu, self._apv, self._party_u):
             raise ValueError("ECDH-ES Key derivation hasn't happened yet")
 
