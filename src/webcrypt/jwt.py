@@ -189,10 +189,10 @@ class JWT:
             return jwks_json
         else:
             key = sha256(passphrase.encode()).digest()[:16]
-            nonce = os.urandom(12)
+            iv = os.urandom(12)
             aesgcm = AESGCM(key)
-            ciphertext = aesgcm.encrypt(nonce, jwks_json.encode(), b'')
-            jwks_enc = nonce + ciphertext
+            ciphertext = aesgcm.encrypt(iv, jwks_json.encode(), b'')
+            jwks_enc = iv + ciphertext
             return conv.bytes_to_b64(jwks_enc)
 
     @classmethod
@@ -238,11 +238,8 @@ class JWT:
         return jwk.sign(payload=conv.doc_to_bytes(token.dict(exclude_none=True)),
                         extra_header=extra_header)
 
-    def verify(self,
-               token: str,
-               TokenClass: Type[T] = Token,
-               access_token: Optional[str] = None,
-               ) -> T:
+    def verify(self, token: str, TokenClass: Type[T] = Token,
+               access_token: Optional[str] = None) -> T:
         """
 
         Verify and decode Token
@@ -279,8 +276,7 @@ class JWT:
             jwk: JWE = choice(self._encrypt_ks)
         return jwk.encrypt(token.json(exclude_none=True).encode(), extra_header=extra_header)
 
-    def decrypt(self,
-                token: str,
+    def decrypt(self, token: str,
                 TokenClass: Type[T] = Token) -> T:
         jwk: JWE = self._encrypt_kid_lookup[JWS.decode_header(token)['kid']]
         return TokenClass(**conv.doc_from_bytes(jwk.decrypt(token)))

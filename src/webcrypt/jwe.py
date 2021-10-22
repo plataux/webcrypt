@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 
-from typing import Dict, Any, Union, Optional
+from typing import Dict, Any, Union, Optional, Tuple
 from math import ceil
 
 import os
@@ -137,7 +137,7 @@ class JWE:
         A256GCM = 'A256GCM'
 
     @staticmethod
-    def gcm_encrypt(key: bytes, auth_data: bytes, data: bytes):
+    def gcm_encrypt(key: bytes, auth_data: bytes, data: bytes) -> Tuple[bytes, bytes, bytes]:
         iv = os.urandom(12)
 
         # Construct an AES-GCM Cipher object with the given key and a
@@ -159,7 +159,7 @@ class JWE:
 
     @staticmethod
     def gcm_decrypt(key: bytes, auth_data: bytes,
-                    iv: bytes, ciphertext: bytes, tag: bytes):
+                    iv: bytes, ciphertext: bytes, tag: bytes) -> bytes:
         # Construct a Cipher object, with the key, iv, and additionally the
         # GCM tag used for authenticating the message.
         decryptor = Cipher(
