@@ -1,4 +1,23 @@
-# https://datatracker.ietf.org/doc/html/rfc7518#section-3.1
+############################################################################
+# Copyright 2021 Plataux LLC                                               #
+#                                                                          #
+# Licensed under the Apache License, Version 2.0 (the "License");          #
+# you may not use this file except in compliance with the License.         #
+# You may obtain a copy of the License at                                  #
+#                                                                          #
+#    https://www.apache.org/licenses/LICENSE-2.0                           #
+#                                                                          #
+# Unless required by applicable law or agreed to in writing, software      #
+# distributed under the License is distributed on an "AS IS" BASIS,        #
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. #
+# See the License for the specific language governing permissions and      #
+# limitations under the License.                                           #
+############################################################################
+
+"""
+Implementation of the JOSE spec at https://datatracker.ietf.org/doc/html/rfc7518#section-3.1
+
+"""
 
 from __future__ import annotations
 
@@ -62,7 +81,7 @@ class JWS:
         return conv.doc_from_b64(token.split('.')[0])
 
     def _init_hmac(self):
-        self._hash_alg = self._alg.value
+        self._hash_alg: hashes.HashAlgorithm = self._alg.value
 
         if self._key is None:
             self._hmac_key = os.urandom(self._hash_alg.digest_size)
@@ -172,6 +191,41 @@ class JWS:
             'kty': self._kty,
             'kid': self._kid,
         }
+
+    def public_jwk(self):
+
+        if self._kty == 'oct':
+            raise ValueError("JWK with kty oct cannot be a public jwk")
+
+        jwk_dict = {
+            "use": 'sig',
+            'kid': self._kid,
+            'kty': self._kty,
+            'alg': self._alg.name,
+        }
+
+        if self._kty == 'RSA':
+            pub_num = self._rsa_pubkey.public_numbers()
+            jwk_dict = {
+                **jwk_dict,
+                "key_ops": ["verify"],
+                'e': conv.int_to_b64(pub_num.e),
+                'n': conv.int_to_b64(pub_num.n),
+            }
+
+        if self._kty == 'EC':
+            pub_num = self._ec_pubkey.public_numbers()
+            jwk_dict = {
+                **jwk_dict,
+                'crv': self._crv,
+                "key_ops": ["verify"],
+                'x': conv.bytes_to_b64(conv.int_to_bytes(
+                    pub_num.x, byte_size=self._ec_size)),
+                'y': conv.bytes_to_b64(conv.int_to_bytes(
+                    pub_num.y, byte_size=self._ec_size)),
+            }
+
+        return jwk_dict
 
     def to_jwk(self) -> Dict[str, str]:
         jwk_dict = {
@@ -456,16 +510,20 @@ class JWS:
             return self._ec_privkey or self._ec_pubkey
 
     @property
-    def hash_alg(self):
+    def hash_alg(self) -> hashes.HashAlgorithm:
         return self._hash_alg
 
     @property
-    def alg(self):
+    def alg(self) -> str:
         return self._alg.name
 
     @property
-    def kid(self):
+    def kid(self) -> str:
         return self._kid
+
+    @property
+    def kty(self) -> str:
+        return self._kty
 
     def _hmac_sign(self, head_payload) -> str:
         h = self._hmac.copy()

@@ -1,3 +1,24 @@
+############################################################################
+# Copyright 2021 Plataux LLC                                               #
+#                                                                          #
+# Licensed under the Apache License, Version 2.0 (the "License");          #
+# you may not use this file except in compliance with the License.         #
+# You may obtain a copy of the License at                                  #
+#                                                                          #
+#    https://www.apache.org/licenses/LICENSE-2.0                           #
+#                                                                          #
+# Unless required by applicable law or agreed to in writing, software      #
+# distributed under the License is distributed on an "AS IS" BASIS,        #
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. #
+# See the License for the specific language governing permissions and      #
+# limitations under the License.                                           #
+############################################################################
+
+"""
+# https://www.iana.org/assignments/jwt/jwt.xhtml#claims
+# https://openid.net/specs/openid-connect-core-1_0.html
+"""
+
 from __future__ import annotations
 
 import json
@@ -5,10 +26,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any, TypeVar, Type
 from pydantic import BaseModel, Field
 
-import os
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+# from cryptography.hazmat.primitives import hashes
+# from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+# from hashlib import sha256
 
 from uuid import uuid4
+import os
 
 import webcrypt.convert as conv
 
@@ -19,43 +43,49 @@ from webcrypt.jwe import JWE
 
 from collections import defaultdict
 
-from hashlib import sha256
-
 import webcrypt.exceptions as tex  # Token Exceptions
 
 
-def dt_offset(days=0, hours=0, minutes=0, seconds=60) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(days=days, hours=hours, minutes=minutes,
-                                                  seconds=seconds)
+def ts_offset(days=0, hours=0, minutes=0, seconds=0) -> int:
+    return int((datetime.now(timezone.utc) + timedelta(days=days,
+                                                       hours=hours,
+                                                       minutes=minutes,
+                                                       seconds=seconds)).timestamp())
 
 
-def dt_now() -> datetime:
-    return datetime.now(timezone.utc)
+def ts_now() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 class Token(BaseModel):
     """
-    Acts as a General Purpose JWT
-    and OpenID Connect Core 1.0 ID Token
+    Acts as a General Purpose JWT, and OpenID Connect Core 1.0 ID Token.
+
     The ID Token is a security token that contains Claims
     about the Authentication of an End-User
-    by an Authorization Server when using a Client
+    by an Authorization Server when authorizing a software client.
+
+    The General JWT Claims are defined here, most of which are optional to use
+
+    https://datatracker.ietf.org/doc/html/rfc7519#section-4.1
 
     The following Claims are used within the ID Token for all
     OAuth 2.0 flows used by OpenID Connect
     """
 
-    # Mandatory Fields
-    # Expires UTC timestamp
-    exp: int = Field(default_factory=lambda: int(dt_offset().timestamp()))
-
     # Issued At UTC Timestamp
-    iat: int = Field(default_factory=lambda: int(dt_now().timestamp()))
+    iat: int = Field(default_factory=lambda: ts_now())
+
+    # Expires UTC timestamp - 60 minutes by default
+    exp: int = Field(default_factory=lambda: ts_offset(minutes=60))
 
     ###############################
     # Generic Fields
     # JWT ID: Unique token Identifier
     jti: str = Field(default_factory=lambda: str(uuid4()))
+
+    # Valid Not Before a given timestamp
+    nbf: Optional[int]
 
     #############################
     # Conditionally Binding Fields
@@ -71,7 +101,7 @@ class Token(BaseModel):
     # It MUST contain the OAuth 2.0 client_id of the Relying Party as an audience value
     aud: Optional[str]
 
-    # in case access_token is provided
+    # in case access_token is provided. This is an OpenID Claim
     at_hash: Optional[str]
 
     #####################################
@@ -92,29 +122,6 @@ class Token(BaseModel):
     #  Authorized party - the party to which the ID Token was issued.
     #  If present, it MUST contain the OAuth 2.0 Client ID of this party.
     azp: Optional[str]
-
-
-class TokenOptions(BaseModel):
-    verify_signature: bool = True
-    verify_aud: bool = True
-    verify_iat: bool = True
-    verify_exp: bool = True
-    verify_nbf: bool = True
-    verify_iss: bool = True
-    verify_sub: bool = True
-    verify_jti: bool = True
-    verify_at_hash: bool = True
-
-    require_aud: bool = False
-    require_iat: bool = False
-    require_exp: bool = False
-    require_nbf: bool = False
-    require_iss: bool = False
-    require_sub: bool = False
-    require_jti: bool = False
-    require_at_hash: bool = False
-
-    leeway: int = 0
 
 
 T = TypeVar('T', bound=Token)
@@ -138,14 +145,16 @@ class JWT:
 
     def __init__(self,
                  jws: Optional[JWS | List[JWS]] = None,
-                 jwe: Optional[JWE | List[JWE]] = None,
-                 options: Optional[TokenOptions] = None):
+                 jwe: Optional[JWE | List[JWE]] = None):
+
+        self._sign_ks: List[JWS]
+
         if jws is None:
             self._sign_ks: List[JWS] = [JWS.random_jws()]
         elif isinstance(jws, JWS):
-            self._sign_ks = [jws]
+            self._sign_ks: List[JWS] = [jws]
         elif isinstance(jws, list):
-            self._sign_ks = list(jws)
+            self._sign_ks: List[JWS] = list(jws)
         else:
             raise ValueError("Unexected JWS Value")
 
@@ -170,10 +179,7 @@ class JWT:
         for jwk in self._encrypt_ks:
             self._encrypt_alg_lookup[jwk.alg].append(jwk)
 
-        if options is None:
-            self._options = TokenOptions()
-
-    def to_jwks(self, passphrase: Optional[str] = None) -> str:
+    def to_jwks(self, encryption_key: Optional[bytes] = None) -> str:
         ks = []
         jwks = {'keys': ks}
 
@@ -185,32 +191,32 @@ class JWT:
 
         jwks_json = json.dumps(jwks, indent=2)
 
-        if passphrase is None:
+        if encryption_key is None:
             return jwks_json
         else:
-            key = sha256(passphrase.encode()).digest()[:16]
             iv = os.urandom(12)
-            aesgcm = AESGCM(key)
+            aesgcm = AESGCM(encryption_key)
             ciphertext = aesgcm.encrypt(iv, jwks_json.encode(), b'')
             jwks_enc = iv + ciphertext
             return conv.bytes_to_b64(jwks_enc)
 
     @classmethod
-    def from_jwks(cls, jwks: str, passphrase: Optional[str] = None) -> "JWT":
-        if passphrase is None:
+    def from_jwks(cls, jwks: str, encryption_key: Optional[bytes] = None) -> "JWT":
+        if encryption_key is None:
             try:
                 jwks_dict: Dict[str, Any] = json.loads(jwks)
             except Exception as ex:
-                raise ValueError(f"Invalid JWKS string: either corrupted, or encrypted: {ex}")
+                raise ValueError(
+                    f"Invalid JWKS string: either corrupted, or encrypted: {ex}")
         else:
+            aesgcm = AESGCM(encryption_key)
             try:
                 jwks_enc = conv.bytes_from_b64(jwks)
-                key = sha256(passphrase.encode()).digest()[:16]
-                aesgcm = AESGCM(key)
                 jwks_json: bytes = aesgcm.decrypt(jwks_enc[:12], jwks_enc[12:], b'')
                 jwks_dict = json.loads(jwks_json)
             except Exception:
-                raise ValueError(f"Could Not Decrypt/Parse JWKS, passphrase maybe invalid")
+                raise ValueError(
+                    f"Could Not Decrypt/Parse JWKS, AES key maybe incorrect")
 
         jws, jwe = [], []
 
@@ -221,6 +227,17 @@ class JWT:
                 jwe.append(JWE.from_jwk(item))
 
         return cls(jws, jwe)
+
+    def public_jwks(self) -> Dict[str, Any]:
+
+        ks = []
+        jwks = {'keys': ks}
+
+        for jwk in self._sign_ks:
+            if jwk.kty != 'oct':
+                ks.append(jwk.public_jwk())
+
+        return jwks
 
     def sign(self, token: Token,
              access_token: Optional[str] = None,
@@ -263,38 +280,54 @@ class JWT:
         # Structural Token validation
         ptoken = TokenClass(**payload)
 
-        self._verify_at_hash(ptoken, access_token, jwk)
+        JWT._verify_at_hash(ptoken, access_token, jwk)
+        JWT._verify_time_claims(ptoken)
 
         return ptoken
 
-    def encrypt(self, token: Token,
+    def encrypt(self, token: Token, compress=True,
                 extra_header: Optional[Dict[str, Any]] = None,
                 kid: Optional[str] = None) -> str:
         if kid is not None:
             jwk: JWE = self._encrypt_kid_lookup[kid]
         else:
             jwk: JWE = choice(self._encrypt_ks)
-        return jwk.encrypt(token.json(exclude_none=True).encode(), extra_header=extra_header)
+        return jwk.encrypt(token.json(exclude_none=True).encode(),
+                           compress=compress, extra_header=extra_header)
 
     def decrypt(self, token: str,
                 TokenClass: Type[T] = Token) -> T:
         jwk: JWE = self._encrypt_kid_lookup[JWS.decode_header(token)['kid']]
         return TokenClass(**conv.doc_from_bytes(jwk.decrypt(token)))
 
-    def _verify_at_hash(self, token: Token, access_token: str, jwk):
+    @staticmethod
+    def _verify_at_hash(token: Token, access_token: str, jwk: JWS):
         try:
             if token.at_hash is not None:
                 if access_token is None:
                     raise tex.InvalidClaims("at_hash is present but access_token "
                                             "was not provided")
                 else:
-                    _at_hash = self.at_hash(access_token, jwk)
+                    _at_hash = JWT.at_hash(access_token, jwk)
                     if token.at_hash != _at_hash:
                         raise tex.InvalidClaims("Invalid at_hash against given access_token")
             if token.at_hash is None and access_token is not None:
                 raise tex.InvalidClaims("at_hash was missing from the token")
         except tex.TokenException as ex:
             raise ex
+
+    @staticmethod
+    def _verify_time_claims(token: Token):
+        now_ts = ts_now()
+
+        if now_ts < token.iat:
+            raise tex.InvalidClaims("iat claim cannot be in the future")
+
+        if now_ts > token.exp:
+            raise tex.InvalidClaims("Token has expired")
+
+        if token.nbf is not None and now_ts < token.nbf:
+            raise tex.InvalidClaims("Token isn't valid yet: nbf hasn't been reached")
 
     @staticmethod
     def at_hash(access_token, jws: JWS) -> str:
