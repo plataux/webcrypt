@@ -1,107 +1,91 @@
-
 import webcrypt.keys as wk
 
 import pytest
 from math import nan
 
-from typing import Dict, Any
+from typing import Dict
 
 
 @pytest.mark.parametrize(
-    "keysize",
+    "key",
     [None, 1025, "2048", 1024.0, 3j + 4, b'1024', nan, 0, int(), int]
 )
-def test_rsa_genkeypair(keysize):
+def test_rsa_genkeypair(key):
     with pytest.raises(ValueError):
-        wk.rsa_genkeypair(keysize)
+        wk.RSA(key)
 
 
 @pytest.mark.parametrize(
     "keysize",
-    [1024, 2048, 3072, 4096]
+    [2048, 3072, 4096]
 )
 def test_RSAKeyPair_export_import(keysize, tmpdir):
-    kp = wk.rsa_genkeypair(keysize)
+    kp = wk.RSA(keysize)
 
-    pem = kp.export_pem_data()
+    pub_pem = kp.pubkey_pem()
+    priv_pem = kp.privkey_pem()
 
     # ensure that private key is PKCS#8 PEM format, which is the more current version
-    assert b'-----BEGIN PRIVATE KEY-----\n' in pem['privkey']
+    assert '-----BEGIN PRIVATE KEY-----\n' in priv_pem
 
     # ensure that public key is in the PEM Format
-    assert b'-----BEGIN PUBLIC KEY-----\n' in pem['pubkey']
+    assert '-----BEGIN PUBLIC KEY-----\n' in pub_pem
 
     # Export and Import of PEM Data
-    kp2 = wk.RSAKeyPair.import_pem_data(kp.export_pem_data())
-    assert repr(kp) == repr(kp2)
-
-    # Export and Import of PEM Files
-    kp.export_pem_files(tmpdir)
-    kp2 = wk.RSAKeyPair.import_pem_files(tmpdir)
-    assert repr(kp) == repr(kp2)
+    kp2 = wk.RSA(kp.privkey_pem())
+    assert kp == kp2
 
     # Export and Import of RSA components dict
-    kp2 = wk.RSAKeyPair.import_from_components(kp.export_to_components())
-    assert repr(kp) == repr(kp2)
+    kp2 = wk.RSA(kp.privkey_dict())
+    assert kp == kp2
 
 
 @pytest.fixture(scope="session")
-def rsa_keys() -> Dict[int, wk.RSAKeyPair]:
+def rsa_keys() -> Dict[int, wk.RSA]:
     rsa_keys = {}
-    for keysize in [1024, 2048, 3072, 4096]:
-        rsa_keys[keysize] = wk.rsa_genkeypair(keysize)
+    for keysize in [2048, 3072, 4096]:
+        rsa_keys[keysize] = wk.RSA(keysize)
     return rsa_keys
-
-
-@pytest.mark.parametrize(
-    "message",
-    [None, 1025, 1024.0, nan, 4 + 2j, int(), int, object(), set(), dict()]
-)
-def test_sign_bad_messages(message):
-    message: Any
-    key = wk.rsa_genkeypair()
-    with pytest.raises(ValueError):
-        wk.rsa_sign(key.privkey, message)
 
 
 @pytest.mark.parametrize(
     "message",
     [r"_/\/\/\`''$%^&%#+" * 20, b"_`''$%^&%#+" * 30]
 )
-def test_rsa_sign_verify(message, rsa_keys: Dict[int, wk.RSAKeyPair]):
+def test_rsa_sign_verify(message, rsa_keys: Dict[int, wk.RSA]):
     for key in rsa_keys.values():
-        sig = wk.rsa_sign(key.privkey, message)
-        assert wk.rsa_verify(key.pubkey, message, sig)
+        sig = key.sign(message)
+        assert key.verify(message, sig)
 
 
 @pytest.mark.parametrize(
     "message_size,ksize",
-    [(62, 1024),
-     (190, 2048),
-     (318, 3072),
-     (446, 4096)]
+    [
+        (190, 2048),
+        (318, 3072),
+        (446, 4096)]
 )
-def test_rsa_encrypt_decrypt_limits(message_size, ksize,
-                                    rsa_keys: Dict[int, wk.RSAKeyPair]):
+def test_rsa_wrap_unwrap_limits(message_size, ksize,
+                                rsa_keys: Dict[int, wk.RSA]):
     key = rsa_keys[ksize]
     m1 = message_size * b'x'
-    m_enc = wk.rsa_encrypt(key.pubkey, m1)
-    assert m1 == wk.rsa_decrypt(key.privkey, message_encrypted=m_enc)
+    m_enc = key.wrap(m1)
+    assert m1 == key.unwrap(m_enc)
 
 
 @pytest.mark.parametrize(
     "message_size,ksize",
-    [(63, 1024),
-     (191, 2048),
-     (319, 3072),
-     (447, 4096)]
+    [
+        (240, 2048),
+        (350, 3072),
+        (480, 4096)]
 )
 def test_rsa_encrypt_decrypt_limits_to_fail(message_size, ksize, rsa_keys):
     key = rsa_keys[ksize]
     m1 = message_size * b'x'
     with pytest.raises(ValueError):
-        m_enc = wk.rsa_encrypt(key.pubkey, m1)
-        assert m1 == wk.rsa_decrypt(key.privkey, message_encrypted=m_enc)
+        m_enc = key.wrap(m1)
+        assert m1 == key.unwrap(message_encrypted=m_enc)
 
 
 @pytest.mark.parametrize(
@@ -110,7 +94,7 @@ def test_rsa_encrypt_decrypt_limits_to_fail(message_size, ksize, rsa_keys):
 )
 def test_rsa_gen_ssh_authorized_key_fail(email, rsa_keys):
     with pytest.raises(ValueError):
-        wk.rsa_gen_ssh_authorized_key(rsa_keys[1024].pubkey, email)
+        rsa_keys[2048].pubkey_ssh(email)
 
 
 @pytest.mark.parametrize(
@@ -119,7 +103,7 @@ def test_rsa_gen_ssh_authorized_key_fail(email, rsa_keys):
 )
 def test_rsa_gen_ssh_authorized_key(email, rsa_keys):
     for key in rsa_keys.values():
-        key_str = wk.rsa_gen_ssh_authorized_key(key.pubkey, email)
+        key_str = key.pubkey_ssh(email)
         assert email in key_str
         assert key_str.split()[2] == email
 
@@ -128,18 +112,14 @@ def test_rsa_gen_ssh_authorized_key(email, rsa_keys):
     "keysize",
     [128, 192, 256]
 )
-def test_hybrid_doc_encrypt_decrypt(keysize, rsa_keys):
-    doc = {'color': '#977cea', 'ascii_company_email': 'jacobsonwilliam@smith.com',
-           'tld': 'com', 'uri_extension': '.php',
-           'credit_card_expire': '01/24', 'ean8': '80978701', 'locale': 'lzh_TW', 'user_name': 'marisa42',
-           'currency_symbol': '₩', 'time_object': '10:13:17',
-           'text': 'Where along good choice. No too cut three political down follow option. Red their able necessary.',
-           'fixed_width': 'Amy Thomas          0  \nLindsey Ross        15 \nLori Walton         14 \nMichael Nguyen'
-                          '8  \nJennifer Fisher     11 \nDavid Tran          3  \nJay Robertson       '
-                          '5  \nCarmen Evans        6  \nPhilip Wagner       16 \nTabitha Ferrell     19 ',
-           'month_name': 'June', 'time': '05:31:48', 'year': '2018'}
+def test_rsa_encrypt_decrypt(keysize, rsa_keys):
+    doc = b"""
+    Python's convenience has made it the most popular language for machine learning and 
+    artificial intelligence. Python's flexibility has allowed Anyscale to make ML/AI 
+    scalable from laptops to clusters.
+    """
 
     for rsa_k in rsa_keys.values():
-        doc_enc = wk.doc_hybrid_encrypt_to_b64(rsa_k.pubkey, doc, keysize=keysize)
-        doc_dec = wk.doc_hybrid_decrypt_from_b64(rsa_k.privkey, doc_enc)
+        doc_enc = rsa_k.encrypt(doc, keysize)
+        doc_dec = rsa_k.decrypt(doc_enc)
         assert doc_dec == doc
