@@ -15,15 +15,17 @@
 ############################################################################
 
 """
+
 # https://www.iana.org/assignments/jwt/jwt.xhtml#claims
 # https://openid.net/specs/openid-connect-core-1_0.html
+
 """
 
 from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, List, Any, TypeVar, Type
+from typing import Optional, Dict, List, Any, TypeVar, Type, Union
 from pydantic import BaseModel, Field
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -55,6 +57,9 @@ def ts_offset(days=0, hours=0, minutes=0, seconds=0) -> int:
 
 def ts_now() -> int:
     return int(datetime.now(timezone.utc).timestamp())
+
+
+T = TypeVar('T', bound='Token')
 
 
 class Token(BaseModel):
@@ -124,9 +129,6 @@ class Token(BaseModel):
     azp: Optional[str]
 
 
-T = TypeVar('T', bound=Token)
-
-
 class JWT:
     """
     Encoder and decoder of JWT Tokens.
@@ -150,11 +152,11 @@ class JWT:
         self._sign_ks: List[JWS]
 
         if jws is None:
-            self._sign_ks: List[JWS] = [JWS.random_jws()]
+            self._sign_ks = [JWS.random_jws()]
         elif isinstance(jws, JWS):
-            self._sign_ks: List[JWS] = [jws]
+            self._sign_ks = [jws]
         elif isinstance(jws, list):
-            self._sign_ks: List[JWS] = list(jws)
+            self._sign_ks = list(jws)
         else:
             raise ValueError("Unexected JWS Value")
 
@@ -162,7 +164,7 @@ class JWT:
         self._sign_alg_lookup = defaultdict(list)
 
         for jwk in self._sign_ks:
-            self._sign_alg_lookup[jwk.alg].append(jwk)
+            self._sign_alg_lookup[jwk.alg_name].append(jwk)
 
         if jwe is None:
             # hkey = wk.hmac_genkey(SHA256())
@@ -176,18 +178,18 @@ class JWT:
         self._encrypt_kid_lookup = {x.kid: x for x in self._encrypt_ks}
         self._encrypt_alg_lookup = defaultdict(list)
 
-        for jwk in self._encrypt_ks:
-            self._encrypt_alg_lookup[jwk.alg].append(jwk)
+        for jwk2 in self._encrypt_ks:
+            self._encrypt_alg_lookup[jwk2.alg_name].append(jwk2)
 
     def to_jwks(self, encryption_key: Optional[bytes] = None) -> str:
-        ks = []
+        ks: List[Dict[str, Any]] = []
         jwks = {'keys': ks}
 
         for item in self._sign_ks:
             ks.append(item.to_jwk())
 
-        for item in self._encrypt_ks:
-            ks.append(item.to_jwk())
+        for item2 in self._encrypt_ks:
+            ks.append(item2.to_jwk())
 
         jwks_json = json.dumps(jwks, indent=2)
 
@@ -216,7 +218,7 @@ class JWT:
                 jwks_dict = json.loads(jwks_json)
             except Exception:
                 raise ValueError(
-                    f"Could Not Decrypt/Parse JWKS, AES key maybe incorrect")
+                    "Could Not Decrypt/Parse JWKS, AES key maybe incorrect")
 
         jws, jwe = [], []
 
@@ -230,7 +232,7 @@ class JWT:
 
     def public_jwks(self) -> Dict[str, Any]:
 
-        ks = []
+        ks: List[Dict[str, Any]] = []
         jwks = {'keys': ks}
 
         for jwk in self._sign_ks:
@@ -247,7 +249,7 @@ class JWT:
         if kid is not None:
             jwk: JWS = self._sign_kid_lookup[kid]
         else:
-            jwk: JWS = choice(self._sign_ks)
+            jwk = choice(self._sign_ks)
 
         if access_token is not None:
             token.at_hash = self.at_hash(access_token, jwk)
@@ -255,30 +257,59 @@ class JWT:
         return jwk.sign(payload=conv.doc_to_bytes(token.dict(exclude_none=True)),
                         extra_header=extra_header)
 
-    def verify(self, token: str, TokenClass: Type[T] = Token,
-               access_token: Optional[str] = None) -> T:
+    def verify(self, token: str, TokenClass: Union[Type[T], Type[Token]] = Token,
+               access_token: Optional[str] = None) -> Union[T, Token]:
         """
-
-        Verify and decode Token
+        Verify the signature, Decode the payload, and validate and deserialize it with the given,
+        or the default ``Token`` Pydantic Model
 
         :param token: Encoded Token str in the format ``b64head.b64payload.b64sig``
-        :param TokenClass:
-        :param access_token:
-        :return: tuple of token validity and Decoded token if raise_errors is ``False``
+        :param TokenClass: Pydantic Model to Deserialize and Validate the token Payload
+        :param access_token: must be provided to calculate and validate at_hash claim, if present
 
-        :raises ValueError: if the raw Token is not a Valid JWT
-            of type ``str`` and structure ``typrb64head.b64payload.b64sig``
+        :return: Valid and Decoded Token of Type ``T`` which is a type of class ``Token``
 
-        :raises
+        :raises InvalidToken: if the JWT header is not a valid JSON serializable object, or the
+            ``kid`` could not be found, or couldn't be extracted from the JWT Header
+
+        :raises TokenException: if no JWK with a matching kid could be found to verify the token
+
+        :raises InvalidToken: if the encoded Token is not a Valid JWT
+            of type ``str`` and structure ``b64head.b64payload.b64sig``
+
+        :raises AlgoMismatch: If the signature algo in the header doesn't match that of the JWK
+
+        :raises InvalidSignature: If the signature is an invalid Base64 encoded string
+
+        :raises InvalidSignature: If the signature of the JWT header+claims is invalid
+
+        :raises InvalidClaims: if calculated at_hash doesn't fit with the access token, or if
+            either of the at_hash or access_token is absent
+
+        :raises ExpiredSignature: if token has expired
+
+        :raises NotYetValid: if token is not valid yet with respect to the specific nbf timestamp
         """
 
-        jwk = self._sign_kid_lookup[JWS.decode_header(token)['kid']]
+        try:
+            kid = JWS.decode_header(token)['kid']
+        except Exception as ex:
+            raise tex.InvalidToken(f"Could not find/extract kid from JWT header: {ex}")
 
-        # validate signature and decode token
-        payload: Dict[str, Any] = conv.doc_from_bytes(jwk.verify(token))
+        if kid not in self._sign_kid_lookup:
+            raise tex.TokenException(f"Could not find the JWK kid matching this token: {kid}")
+
+        jwk: JWS = self._sign_kid_lookup[kid]
+
+        payload_raw = jwk.verify(token)
 
         # Structural Token validation
-        ptoken = TokenClass(**payload)
+        try:
+            # validate signature and decode token
+            payload: Dict[str, Any] = conv.doc_from_bytes(payload_raw)
+            ptoken = TokenClass(**payload)
+        except Exception as ex:
+            raise tex.InvalidClaims(f"invalid or missing claims from the defined schema: {ex}")
 
         JWT._verify_at_hash(ptoken, access_token, jwk)
         JWT._verify_time_claims(ptoken)
@@ -289,19 +320,64 @@ class JWT:
                 extra_header: Optional[Dict[str, Any]] = None,
                 kid: Optional[str] = None) -> str:
         if kid is not None:
-            jwk: JWE = self._encrypt_kid_lookup[kid]
+            jwk = self._encrypt_kid_lookup[kid]
         else:
-            jwk: JWE = choice(self._encrypt_ks)
+            jwk = choice(self._encrypt_ks)
         return jwk.encrypt(token.json(exclude_none=True).encode(),
                            compress=compress, extra_header=extra_header)
 
     def decrypt(self, token: str,
-                TokenClass: Type[T] = Token) -> T:
-        jwk: JWE = self._encrypt_kid_lookup[JWS.decode_header(token)['kid']]
-        return TokenClass(**conv.doc_from_bytes(jwk.decrypt(token)))
+                TokenClass: Union[Type[T], Type[Token]] = Token) -> Union[T, Token]:
+        """
+
+        :param token:
+        :param TokenClass:
+        :return: Valid and Decoded Token of Type ``T`` which is a type of class ``Token``
+
+        :raises InvalidToken: if the JWT header is not a valid JSON serializable object, or the
+            ``kid`` could not be found, or couldn't be extracted from the JWT Header
+
+        :raises TokenException: if no JWK with a matching kid could be found to verify the token
+
+        :raises InvalidToken: if the encoded Token is not a Valid JWT
+            of type ``str`` and structure ``b64head.b64payload.b64sig``
+
+        :raises AlgoMismatch: If the signature algo in the header doesn't match that of the JWK
+
+        :raises InvalidToken: If the token could not be decrypted due to
+            being corrupted or tampered with
+
+        :raises ExpiredSignature: if token has expired
+
+        :raises NotYetValid: if token is not valid yet with respect to the specific nbf timestamp
+        """
+
+        try:
+            kid = JWS.decode_header(token)['kid']
+        except Exception as ex:
+            raise tex.InvalidToken(f"Could not find/extract kid from JWT header: {ex}")
+
+        if kid not in self._sign_kid_lookup:
+            raise tex.TokenException(f"Could not find the JWK kid matching this token: {kid}")
+
+        jwk: JWE = self._encrypt_kid_lookup[kid]
+
+        payload_raw = jwk.decrypt(token)
+
+        # Structural Token validation
+        try:
+            # validate signature and decode token
+            payload: Dict[str, Any] = conv.doc_from_bytes(payload_raw)
+            ptoken = TokenClass(**payload)
+        except Exception as ex:
+            raise tex.InvalidClaims(f"invalid or missing claims from the defined schema: {ex}")
+
+        JWT._verify_time_claims(ptoken)
+
+        return ptoken
 
     @staticmethod
-    def _verify_at_hash(token: Token, access_token: str, jwk: JWS):
+    def _verify_at_hash(token: Token, access_token: Union[str, None], jwk: JWS):
         try:
             if token.at_hash is not None:
                 if access_token is None:
@@ -324,10 +400,10 @@ class JWT:
             raise tex.InvalidClaims("iat claim cannot be in the future")
 
         if now_ts > token.exp:
-            raise tex.InvalidClaims("Token has expired")
+            raise tex.ExpiredSignature("Token has expired")
 
         if token.nbf is not None and now_ts < token.nbf:
-            raise tex.InvalidClaims("Token isn't valid yet: nbf hasn't been reached")
+            raise tex.NotYetValid("Token isn't valid yet: nbf hasn't been reached")
 
     @staticmethod
     def at_hash(access_token, jws: JWS) -> str:

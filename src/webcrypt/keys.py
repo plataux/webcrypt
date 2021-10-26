@@ -57,6 +57,7 @@ from base64 import urlsafe_b64encode, urlsafe_b64decode, b16encode, b16decode
 
 from enum import Enum
 
+
 # https://searchsecurity.techtarget.com/definition/Advanced-Encryption-Standard
 
 # the first password hashing scheme is the default one.
@@ -75,6 +76,7 @@ class AES:
     new and existing keys.
 
     """
+
     @staticmethod
     def restore_key_bytes(key: Union[str, List[int]]) -> bytes:
         """
@@ -267,7 +269,11 @@ english : {self.words}
     def __repr__(self) -> str:
         return str(self._key)
 
-    def __eq__(self, other: AES):
+    def __eq__(self, other) -> bool:
+
+        if not isinstance(other, AES):
+            return NotImplemented
+
         if self._key == other._key:
             return True
         else:
@@ -396,11 +402,21 @@ class RSA:
                 key = key.encode()
 
             if b'PRIVATE' in key:
-                self.privkey = ser.load_pem_private_key(key, password=None)
+                kx = ser.load_pem_private_key(key, password=None)
+                if not isinstance(kx, rsa.RSAPrivateKey):
+                    raise ValueError("Invalid RSA Private Key")
+
+                self.privkey = kx
                 self.pubkey = self.privkey.public_key()
+
             elif b'PUBLIC' in key:
+                ky = ser.load_pem_public_key(key)
+
+                if not isinstance(ky, rsa.RSAPublicKey):
+                    raise ValueError("Invalid RSA Public Key")
+
                 self.privkey = None
-                self.pubkey = ser.load_pem_public_key(key)
+                self.pubkey = ky
             else:
                 raise ValueError("Invalid PEM file")
 
@@ -468,7 +484,7 @@ class RSA:
 
         if sign_padding == RSA.SignAlg.PSS:
             salt_len = padding.PSS.MAX_LENGTH if max_pss_salt else hash_alg.digest_size
-            _sign_padding = padding.PSS(
+            _sign_padding: Any = padding.PSS(
                 mgf=padding.MGF1(hash_alg),
                 salt_length=salt_len)
         elif sign_padding == RSA.SignAlg.PKCS1v15:
@@ -500,7 +516,7 @@ class RSA:
 
         if sign_padding == RSA.SignAlg.PSS:
             salt_len = padding.PSS.MAX_LENGTH if max_pss_salt else hash_alg.digest_size
-            _sign_padding = padding.PSS(
+            _sign_padding: Any = padding.PSS(
                 mgf=padding.MGF1(hash_alg),
                 salt_length=salt_len)
         elif sign_padding == RSA.SignAlg.PKCS1v15:
@@ -643,7 +659,10 @@ class RSA:
     def __repr__(self) -> str:
         return str(self)
 
-    def __eq__(self, other: RSA):
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, RSA):
+            return NotImplemented
+
         if self.pubkey_pem() == other.pubkey_pem():
             return True
         else:
@@ -689,7 +708,7 @@ class ECKey:
 
         if isinstance(key, int):
             if key == 256:
-                curve = ec.SECP256R1()
+                curve: ec.EllipticCurve = ec.SECP256R1()
             elif key == 384:
                 curve = ec.SECP384R1()
             elif key == 521:
@@ -700,15 +719,26 @@ class ECKey:
             self.pubkey = self.privkey.public_key()
 
         elif isinstance(key, (str, bytes)):
+
             if isinstance(key, str):
-                key.encode()
+                key = key.encode()
 
             if b'PRIVATE' in key:
-                self.privkey = ser.load_pem_private_key(key, password=None)
+                priv_key = ser.load_pem_private_key(key, password=None)
+
+                if not isinstance(priv_key, ec.EllipticCurvePrivateKey):
+                    raise ValueError("Invalid EC Private Key")
+
+                self.privkey = priv_key
                 self.pubkey = self.privkey.public_key()
             elif b'PUBLIC' in key:
+                pub_key = ser.load_pem_public_key(key)
+
+                if not isinstance(pub_key, ec.EllipticCurvePublicKey):
+                    raise ValueError("Invalid EC Private Key")
+
                 self.privkey = None
-                self.pubkey = ser.load_pem_public_key(key)
+                self.pubkey = pub_key
             else:
                 raise ValueError("Invalid PEM file")
 
@@ -736,7 +766,11 @@ class ECKey:
         else:
             raise ValueError("Invalid EC input")
 
-    def __eq__(self, other: ECKey):
+    def __eq__(self, other) -> bool:
+
+        if not isinstance(other, ECKey):
+            return NotImplemented
+
         if self.pubkey_pem() == other.pubkey_pem():
             return True
         else:
@@ -871,11 +905,8 @@ class EDKey:
 
     def __init__(self, key: Optional[_ed_types] = None):
 
-        self.privkey: Optional[ed.Ed25519PrivateKey]
-        self.pubkey: ed.Ed25519PublicKey
-
         if key is None:
-            self.privkey: ed = ed.Ed25519PrivateKey.generate()
+            self.privkey: Union[ed.Ed25519PrivateKey, None] = ed.Ed25519PrivateKey.generate()
             self.pubkey: ed.Ed25519PublicKey = self.privkey.public_key()
 
         elif isinstance(key, ed.Ed25519PrivateKey):
@@ -888,14 +919,26 @@ class EDKey:
 
         elif isinstance(key, (str, bytes)):
             if isinstance(key, str):
-                key.encode()
+                key = key.encode()
 
             if b'PRIVATE' in key:
-                self.privkey = ser.load_pem_private_key(key, password=None)
+
+                priv_key = ser.load_pem_private_key(key, password=None)
+
+                if not isinstance(priv_key, ed.Ed25519PrivateKey):
+                    raise ValueError("Invalid ED Curve Private Key")
+
+                self.privkey = priv_key
                 self.pubkey = self.privkey.public_key()
             elif b'PUBLIC' in key:
+
+                pub_key = ser.load_pem_public_key(key)
+
+                if not isinstance(pub_key, ed.Ed25519PublicKey):
+                    raise ValueError("Invalid ED Curve Public Key")
+
                 self.privkey = None
-                self.pubkey = ser.load_pem_public_key(key)
+                self.pubkey = pub_key
             else:
                 raise ValueError("Invalid PEM file")
 
@@ -903,7 +946,10 @@ class EDKey:
             raise ValueError("Invalid ED Key")
 
     def sign(self, data) -> bytes:
-        return self.privkey.sign(data)
+        if self.privkey is not None:
+            return self.privkey.sign(data)
+        else:
+            raise RuntimeError("This ED Key cannot sign - not a private key")
 
     def verify(self, data, signature) -> bool:
         try:
@@ -927,10 +973,13 @@ class EDKey:
             ser.PublicFormat.SubjectPublicKeyInfo).decode()
 
     def privkey_hex(self) -> str:
-        pb: bytes = self.privkey.private_bytes(encoding=ser.Encoding.Raw,
-                                               format=ser.PrivateFormat.Raw,
-                                               encryption_algorithm=ser.NoEncryption())
-        return pb.hex()
+        if self.privkey is not None:
+            pb: bytes = self.privkey.private_bytes(encoding=ser.Encoding.Raw,
+                                                   format=ser.PrivateFormat.Raw,
+                                                   encryption_algorithm=ser.NoEncryption())
+            return pb.hex()
+        else:
+            raise RuntimeError("This ED Key is not a private key")
 
     def pubkey_hex(self) -> str:
         return self.pubkey.public_bytes(ser.Encoding.Raw,

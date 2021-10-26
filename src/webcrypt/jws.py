@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import enum
 
-from typing import Dict, Any, Union, Optional
+from typing import Dict, Any, Union, Optional, Tuple, List
 from math import ceil
 from random import choice
 import os
@@ -83,8 +83,10 @@ class JWS:
     def _init_hmac(self):
         self._hash_alg: hashes.HashAlgorithm = self._alg.value
 
+        self._key: Optional[jws_kty]
+
         if self._key is None:
-            self._hmac_key = os.urandom(self._hash_alg.digest_size)
+            self._hmac_key: bytes = os.urandom(self._hash_alg.digest_size)
         elif isinstance(self._key, bytes):
             if len(self._key) < self._hash_alg.digest_size:
                 raise ValueError("HMAC key needs to be larger than Hash Digest")
@@ -112,16 +114,16 @@ class JWS:
         self._hash_alg = self._alg.value['hash_alg']
 
         if self._alg.value['rsa_padding'] == "PSS":
-            self._rsa_pad = padding.PSS(mgf=padding.MGF1(self._hash_alg),
-                                        salt_length=self._hash_alg.digest_size)
+            self._rsa_pad: Any = padding.PSS(mgf=padding.MGF1(self._hash_alg),
+                                             salt_length=self._hash_alg.digest_size)
         else:
             self._rsa_pad = padding.PKCS1v15()
 
         self._kty = 'RSA'
 
         if isinstance(self._key, rsa.RSAPrivateKey):
-            self._rsa_privkey = self._key
-            self._rsa_pubkey = self._key.public_key()
+            self._rsa_privkey: Union[rsa.RSAPrivateKey, None] = self._key
+            self._rsa_pubkey: rsa.RSAPublicKey = self._key.public_key()
             self._can_sign = True
         else:
             self._rsa_privkey = None
@@ -150,8 +152,8 @@ class JWS:
         self._ec_size = int(ceil(self._key.key_size / 8))
 
         if isinstance(self._key, ec.EllipticCurvePrivateKey):
-            self._ec_privkey = self._key
-            self._ec_pubkey = self._key.public_key()
+            self._ec_privkey: Union[ec.EllipticCurvePrivateKey, None] = self._key
+            self._ec_pubkey: ec.EllipticCurvePublicKey = self._key.public_key()
             self._can_sign = True
         else:
             self._ec_privkey = None
@@ -165,14 +167,14 @@ class JWS:
                  '_ec_pubkey', '_ec_privkey', '_ec_size', '_crv', '_can_sign',
                  '_rsa_pubkey', '_rsa_privkey', '_rsa_pad')
 
-    def __init__(self, algorithm: Optional[JWS.Algorithm] = None,
+    def __init__(self, algorithm: Union[JWS.Algorithm, None],
                  key_obj: Optional[jws_kty] = None,
                  kid: Optional[str] = None):
 
-        if algorithm is None and key_obj is None:
+        if algorithm is None:
             algorithm = JWS.Algorithm.ES256
 
-        self._alg = algorithm
+        self._alg: JWS.Algorithm = algorithm
         self._key = key_obj
 
         if self._alg.name in JWS._HMAC:
@@ -192,12 +194,12 @@ class JWS:
             'kid': self._kid,
         }
 
-    def public_jwk(self):
+    def public_jwk(self) -> Dict[str, Any]:
 
         if self._kty == 'oct':
             raise ValueError("JWK with kty oct cannot be a public jwk")
 
-        jwk_dict = {
+        jwk_dict: Dict[str, Any] = {
             "use": 'sig',
             'kid': self._kid,
             'kty': self._kty,
@@ -214,21 +216,21 @@ class JWS:
             }
 
         if self._kty == 'EC':
-            pub_num = self._ec_pubkey.public_numbers()
+            ec_pub_num = self._ec_pubkey.public_numbers()
             jwk_dict = {
                 **jwk_dict,
-                'crv': self._crv,
                 "key_ops": ["verify"],
+                'crv': self._crv,
                 'x': conv.bytes_to_b64(conv.int_to_bytes(
-                    pub_num.x, byte_size=self._ec_size)),
+                    ec_pub_num.x, byte_size=self._ec_size)),
                 'y': conv.bytes_to_b64(conv.int_to_bytes(
-                    pub_num.y, byte_size=self._ec_size)),
+                    ec_pub_num.y, byte_size=self._ec_size)),
             }
 
         return jwk_dict
 
     def to_jwk(self) -> Dict[str, str]:
-        jwk_dict = {
+        jwk_dict: Dict[str, Any] = {
             "use": 'sig',
             'kid': self._kid,
             'kty': self._kty,
@@ -240,15 +242,18 @@ class JWS:
             jwk_dict['k'] = conv.bytes_to_b64(self._hmac_key)
 
         elif self._kty == 'RSA':
+
+            kops = ["verify"]
+
             pub_num = self._rsa_pubkey.public_numbers()
             jwk_dict = {
                 **jwk_dict,
-                "key_ops": ["verify"],
+                "key_ops": kops,
                 'e': conv.int_to_b64(pub_num.e),
                 'n': conv.int_to_b64(pub_num.n),
             }
 
-            if self._can_sign:
+            if self._rsa_privkey is not None:
                 priv_num = self._rsa_privkey.private_numbers()
                 jwk_dict = {
                     **jwk_dict,
@@ -260,27 +265,28 @@ class JWS:
                     'qi': conv.int_to_b64(priv_num.iqmp)
                 }
 
-                jwk_dict['key_ops'] = ['sign', 'verify']
+                kops.insert(0, "sign")
 
         elif self._kty == 'EC':
-            pub_num = self._ec_pubkey.public_numbers()
+            kops = ["verify"]
+            ec_pub_num = self._ec_pubkey.public_numbers()
             jwk_dict = {
                 **jwk_dict,
+                "key_ops": kops,
                 'crv': self._crv,
-                "key_ops": ["verify"],
                 'x': conv.bytes_to_b64(conv.int_to_bytes(
-                    pub_num.x, byte_size=self._ec_size)),
+                    ec_pub_num.x, byte_size=self._ec_size)),
                 'y': conv.bytes_to_b64(conv.int_to_bytes(
-                    pub_num.y, byte_size=self._ec_size)),
+                    ec_pub_num.y, byte_size=self._ec_size)),
             }
 
-            if self._can_sign:
+            if self._ec_privkey is not None:
                 pv = self._ec_privkey.private_numbers().private_value
 
                 jwk_dict['d'] = conv.bytes_to_b64(conv.int_to_bytes(
                     pv, byte_size=self._ec_size))
 
-                jwk_dict['key_ops'] = ['sign', 'verify']
+                kops.insert(0, "sign")
 
         return jwk_dict
 
@@ -380,7 +386,7 @@ class JWS:
         if self._kty == 'oct':
             return conv.bytes_to_b64(self._hmac_key)
         elif self._kty == 'RSA':
-            if self._can_sign:
+            if self._rsa_privkey is not None:
                 return self._rsa_privkey.private_bytes(ser.Encoding.PEM,
                                                        ser.PrivateFormat.PKCS8,
                                                        ser.NoEncryption()).decode()
@@ -389,7 +395,7 @@ class JWS:
                     ser.Encoding.PEM,
                     ser.PublicFormat.SubjectPublicKeyInfo).decode()
         elif self._kty == 'EC':
-            if self._can_sign:
+            if self._ec_privkey is not None:
                 return self._ec_privkey.private_bytes(
                     ser.Encoding.PEM,
                     ser.PrivateFormat.PKCS8,
@@ -398,18 +404,28 @@ class JWS:
                 return self._ec_pubkey.public_bytes(
                     ser.Encoding.PEM,
                     ser.PublicFormat.SubjectPublicKeyInfo).decode()
+        else:
+            raise RuntimeError("should be an unreachable statement")
 
     @classmethod
     def from_pem(cls, key_pem: str | bytes,
-                 algorithm: Algorithm = None, kid=None) -> "JWS":
+                 algorithm: Union[Algorithm, None] = None, kid=None) -> "JWS":
         if isinstance(key_pem, str):
             key_pem = key_pem.encode()
 
         if b'PRIVATE' in key_pem:
-            return cls(algorithm, ser.load_pem_private_key(key_pem, password=None), kid)
+            priv_key = ser.load_pem_private_key(key_pem, password=None)
+            if not isinstance(priv_key, (rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey)):
+                raise ValueError("Invalid Private Key")
+            return cls(algorithm, priv_key, kid)
+
         elif b'PUBLIC' in key_pem:
-            return cls(algorithm, ser.load_pem_public_key(key_pem), kid)
-        elif algorithm in JWS._HMAC or algorithm is None:
+            pub_key = ser.load_pem_public_key(key_pem)
+            if not isinstance(pub_key, (rsa.RSAPublicKey, ec.EllipticCurvePublicKey)):
+                raise ValueError("Invalid Public Key")
+            return cls(algorithm, pub_key, kid)
+
+        elif algorithm is None or algorithm.name in JWS._HMAC:
             return cls(algorithm, conv.bytes_from_b64(key_pem.decode()), kid)
         else:
             raise ValueError("Invalid PEM file")
@@ -472,9 +488,12 @@ class JWS:
         J = JWS.Algorithm
 
         def _hmac_key():
-            hx = [(SHA256, J.HS256), (SHA384, J.HS384), (SHA512, J.HS512)]
+            hx: List[Tuple[hashes.HashAlgorithm, JWS.Algorithm]] = [
+                (SHA256(), J.HS256), (SHA384(), J.HS384), (SHA512(), J.HS512)
+            ]
             h = choice(hx)
-            return cls(h[1], os.urandom(h[0].digest_size))
+            ks: int = h[0].digest_size
+            return cls(h[1], os.urandom(ks))
 
         def _rsa_key():
             hx = [J.PS256, J.PS384, J.PS512, J.RS256, J.RS384, J.RS512]
@@ -491,7 +510,12 @@ class JWS:
             _ec_key
         ]
 
-        return choice(_tx)()
+        jwk = choice(_tx)()
+
+        if not isinstance(jwk, JWS):
+            raise RuntimeError("unexpected randomly generated JWS")
+
+        return jwk
 
     def do_hash(self, data: str | bytes) -> bytes:
         if isinstance(data, str):
@@ -508,13 +532,37 @@ class JWS:
             return self._rsa_privkey or self._rsa_pubkey
         elif self._kty == 'EC':
             return self._ec_privkey or self._ec_pubkey
+        else:
+            raise RuntimeError("unexpected kty")
+
+    @property
+    def privkey(self) -> Union[bytes, rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey]:
+        if self._kty == 'oct':
+            return self._hmac_key
+        elif self._kty == 'RSA':
+            if self._rsa_privkey is not None:
+                return self._rsa_privkey
+        elif self._kty == 'EC':
+            if self._ec_privkey is not None:
+                return self._ec_privkey
+
+        raise RuntimeError("This key is not capable of signing")
+
+    @property
+    def pubkey(self) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
+        if self._kty == 'RSA':
+            return self._rsa_pubkey
+        elif self._kty == 'EC':
+            return self._ec_pubkey
+        else:
+            raise ValueError("This HMAC JWS object doesn't have a public component")
 
     @property
     def hash_alg(self) -> hashes.HashAlgorithm:
         return self._hash_alg
 
     @property
-    def alg(self) -> str:
+    def alg_name(self) -> str:
         return self._alg.name
 
     @property
@@ -540,8 +588,11 @@ class JWS:
         return conv.bytes_from_b64(payload_enc)
 
     def _ec_sign(self, head_payload) -> str:
-        sig = self._ec_privkey.sign(head_payload.encode(), ec.ECDSA(self._hash_alg))
-        return f'{head_payload}.{conv.ec_sig_der_to_raw_b64(sig, byte_size=self._ec_size)}'
+        if self._ec_privkey is not None:
+            sig = self._ec_privkey.sign(head_payload.encode(), ec.ECDSA(self._hash_alg))
+            return f'{head_payload}.{conv.ec_sig_der_to_raw_b64(sig, byte_size=self._ec_size)}'
+        else:
+            raise RuntimeError("This EC JWS is not capable of signing - no privkey")
 
     def _ec_verify(self, header_enc, payload_enc, sig: bytes) -> bytes:
         try:
@@ -554,8 +605,11 @@ class JWS:
         return conv.bytes_from_b64(payload_enc)
 
     def _rsa_sign(self, head_payload) -> str:
-        sig = self._rsa_privkey.sign(head_payload.encode(), self._rsa_pad, self._hash_alg)
-        return f'{head_payload}.{conv.bytes_to_b64(sig)}'
+        if self._rsa_privkey is not None:
+            sig = self._rsa_privkey.sign(head_payload.encode(), self._rsa_pad, self._hash_alg)
+            return f'{head_payload}.{conv.bytes_to_b64(sig)}'
+        else:
+            raise RuntimeError("This RSA JWS is not capable of signing - no privkey")
 
     def _rsa_verify(self, header_enc, payload_enc, sig) -> bytes:
         try:

@@ -32,3 +32,11 @@ class InvalidSignature(TokenException):
 
 class InvalidClaims(TokenException):
     pass
+
+
+class ExpiredSignature(TokenException):
+    pass
+
+
+class NotYetValid(TokenException):
+    pass
