@@ -117,5 +117,5 @@ Verification and Decoding Steps
 The jwt JOSE Spec Module
 ************************
 
-.. automodule:: webcrypt.jwe
+.. automodule:: webcrypt.jwt
    :members:
