@@ -1061,7 +1061,7 @@ class JWE:
     def _encrypt_ecdh(self, plaintext: bytes, compress=True,
                       extra_header: Optional[Dict[str, Any]] = None) -> str:
         if None in (self._ec_derkey, self._apu, self._apv, self._party_u):
-            raise ValueError("ECDH-ES Key derivation hasn't happened yet")
+            raise RuntimeError("ECDH-ES Key derivation hasn't happened yet")
 
         header: JWE_Header = self._jwe_header.copy()
         header.zip = 'DEF' if compress else None

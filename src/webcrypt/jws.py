@@ -50,20 +50,26 @@ jws_kty = Union[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey,
 
 class JWS:
     class Algorithm(enum.Enum):
-        HS256 = SHA256()
-        HS384 = SHA384()
-        HS512 = SHA512()
-        RS256 = {'hash_alg': SHA256(), "rsa_padding": "PKCS1v15"}
-        RS384 = {'hash_alg': SHA384(), "rsa_padding": "PKCS1v15"}
-        RS512 = {'hash_alg': SHA512(), "rsa_padding": "PKCS1v15"}
-        PS256 = {'hash_alg': SHA256(), "rsa_padding": "PSS"}
-        PS384 = {'hash_alg': SHA384(), "rsa_padding": "PSS"}
-        PS512 = {'hash_alg': SHA512(), "rsa_padding": "PSS"}
-        ES256 = {'hash_alg': SHA256(), 'curve': SECP256R1()}
-        ES384 = {'hash_alg': SHA384(), 'curve': SECP384R1()}
-        ES512 = {'hash_alg': SHA512(), 'curve': SECP521R1()}
+        HS256 = "HS256"
+        HS384 = "HS384"
+        HS512 = "HS512"
+        RS256 = "RS256"
+        RS384 = "RS384"
+        RS512 = "RS512"
+        PS256 = "PS256"
+        PS384 = "PS384"
+        PS512 = "PS512"
+        ES256 = "ES256"
+        ES384 = "ES384"
+        ES512 = "ES512"
 
-    _jwk_curves = {
+    alg_to_curve: Dict[str, Any] = {
+        'ES256': {'curve': SECP256R1()},
+        'ES384': {'curve': SECP384R1()},
+        'ES512': {'curve': SECP521R1()},
+    }
+
+    curve_to_alg: Dict[str, Any] = {
         'secp256r1': {'alg': 'ES256', 'crv': 'P-256'},
         'secp384r1': {'alg': 'ES384', 'crv': 'P-384'},
         'secp521r1': {'alg': 'ES512', 'crv': 'P-521'},
@@ -77,11 +83,25 @@ class JWS:
     _rsa_types = (rsa.RSAPrivateKey, rsa.RSAPublicKey)
 
     @staticmethod
+    def get_hash_alg(jws_alg: str | Algorithm) -> hashes.HashAlgorithm:
+        if isinstance(jws_alg, JWS.Algorithm):
+            jws_alg = jws_alg.value
+
+        if (_alg := jws_alg[2:]) == '256':
+            return SHA256()
+        elif _alg == '384':
+            return SHA384()
+        elif _alg == '512':
+            return SHA512()
+        else:
+            raise ValueError("unexpected JWS Algo")
+
+    @staticmethod
     def decode_header(token: str) -> Dict[str, Any]:
         return conv.doc_from_b64(token.split('.')[0])
 
     def _init_hmac(self):
-        self._hash_alg: hashes.HashAlgorithm = self._alg.value
+        self._hash_alg: hashes.HashAlgorithm = JWS.get_hash_alg(self._alg)
 
         self._key: Optional[jws_kty]
 
@@ -97,7 +117,7 @@ class JWS:
 
         self._kty = 'oct'
         self._can_sign = True
-        self._hmac = hmac.HMAC(self._hmac_key, self._alg.value)
+        self._hmac = hmac.HMAC(self._hmac_key, self._hash_alg)
 
         del self._key
 
@@ -111,9 +131,9 @@ class JWS:
         if self._key.key_size < 2048:
             raise ValueError("RSA key size too small - breakable")
 
-        self._hash_alg = self._alg.value['hash_alg']
+        self._hash_alg = JWS.get_hash_alg(self._alg)
 
-        if self._alg.value['rsa_padding'] == "PSS":
+        if self._alg.value[:2] == "PS":
             self._rsa_pad: Any = padding.PSS(mgf=padding.MGF1(self._hash_alg),
                                              salt_length=self._hash_alg.digest_size)
         else:
@@ -134,21 +154,21 @@ class JWS:
 
     def _init_ec(self):
         if self._key is None:
-            self._key = ec.generate_private_key(self._alg.value['curve'])
+            self._key = ec.generate_private_key(JWS.alg_to_curve[self._alg.value]['curve'])
 
         if not isinstance(self._key, JWS._ec_types):
             raise ValueError("Invalid EC Key")
 
-        if self._key.curve.name not in JWS._jwk_curves:
+        if self._key.curve.name not in JWS.curve_to_alg:
             raise ValueError("This EC curve is not valid for the JOSE spec")
 
-        if JWS._jwk_curves[self._key.curve.name]['alg'] != self._alg.name:
+        if JWS.curve_to_alg[self._key.curve.name]['alg'] != self._alg.name:
             raise ValueError("This JWS Hash algo is not compatible with this key curve: "
                              f"{self._key.curve.name} with {self._alg.name}")
 
         self._kty = 'EC'
-        self._crv = JWS._jwk_curves[self._key.curve.name]['crv']
-        self._hash_alg = self._alg.value['hash_alg']
+        self._crv = JWS.curve_to_alg[self._key.curve.name]['crv']
+        self._hash_alg = JWS.get_hash_alg(self._alg)
         self._ec_size = int(ceil(self._key.key_size / 8))
 
         if isinstance(self._key, ec.EllipticCurvePrivateKey):
@@ -361,7 +381,7 @@ class JWS:
                     raise ValueError(
                         f"EC crv and JWS alg incompatible: {_crv} with {alg_name}")
 
-            key_curve = alg.value['curve']
+            key_curve = JWS.alg_to_curve[alg.value]['curve']
 
             if all(comp in jwk for comp in ('x', 'y', 'd')):
                 ec_key = ec.derive_private_key(
@@ -572,6 +592,13 @@ class JWS:
     @property
     def kty(self) -> str:
         return self._kty
+
+    def __str__(self) -> str:
+        privpub = "private" if self._can_sign else "public"
+        return f"{self.kty} | {self.alg_name} | {self.kid} | {privpub}"
+
+    def __repr__(self) -> str:
+        return str(self)
 
     def _hmac_sign(self, head_payload) -> str:
         h = self._hmac.copy()
