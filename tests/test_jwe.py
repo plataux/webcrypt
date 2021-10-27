@@ -129,3 +129,61 @@ def test_dir_ops(enc):
 )
 def test_kw_ops(enc):
     ek = JWE()
+
+
+@pytest.mark.parametrize(
+    "alg",
+    [JWE.Algorithm.ECDH_ES, JWE.Algorithm.ECDH_ES_A128KW,
+     JWE.Algorithm.ECDH_ES_A192KW, JWE.Algorithm.ECDH_ES_A256KW]
+)
+def test_ecdh_1(alg):
+
+    k1 = JWE(algorithm=alg)
+
+    k2 = JWE(algorithm=alg)
+
+    data = b'some data to be encrpyted and decrypted'
+
+    with pytest.raises(RuntimeError):
+        k1.encrypt(data)
+
+    u_params = k1.party_u_generate('Alice')
+
+    with pytest.raises(RuntimeError):
+        k1.encrypt(data)
+
+    v_params = k2.party_v_import(u_params, 'Bob')
+
+    data_enc = k2.encrypt(data)
+
+    assert k1.decrypt(data_enc) == data
+
+
+@pytest.mark.parametrize(
+    "alg",
+    [JWE.Algorithm.ECDH_ES, JWE.Algorithm.ECDH_ES_A128KW,
+     JWE.Algorithm.ECDH_ES_A192KW, JWE.Algorithm.ECDH_ES_A256KW]
+)
+def test_ecdh_2(alg):
+
+    k1 = JWE(algorithm=alg)
+
+    k2 = JWE(algorithm=alg)
+
+    data = b'some data to be encrpyted and decrypted'
+
+    with pytest.raises(RuntimeError):
+        k1.encrypt(data)
+
+    u_params = k1.party_u_generate('Alice')
+
+    with pytest.raises(RuntimeError):
+        k1.encrypt(data)
+
+    uv_params = k2.party_v_import(u_params, 'Bob')
+
+    k1.party_u_import(uv_params)
+
+    data_enc = k1.encrypt(data, compress=True, extra_header={'cty': 'binary'})
+
+    assert k2.decrypt(data_enc) == data
