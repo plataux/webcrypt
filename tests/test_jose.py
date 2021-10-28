@@ -1,8 +1,10 @@
+
+
 import pytest
 
 from webcrypt.jwe import JWE
 from webcrypt.jws import JWS
-from webcrypt.jwt import JWT, Token
+from webcrypt.jose import JOSE, Token
 
 from typing import Tuple, List
 
@@ -34,24 +36,24 @@ def keyset() -> Tuple[List[JWS], List[JWE]]:
 
 def test_jwt_export_import(keyset):
     sig_ks, enc_ks = keyset
-    jwks = JWT(sig_ks, enc_ks)
+    jwks = JOSE(sig_ks, enc_ks)
 
     # export and import of jwks objects, and construction of JWT objects
-    jwks2 = JWT.from_jwks(jwks.to_jwks())
+    jwks2 = JOSE.from_jwks(jwks.to_jwks())
     assert jwks2.to_jwks() == jwks.to_jwks()
 
     # export and import JWS and JWE objects, and construction of JWT objects
-    jwks2 = JWT(jws=jwks.get_sig_jwks, jwe=jwks.get_enc_jwks)
+    jwks2 = JOSE(jws=jwks.get_sig_jwks, jwe=jwks.get_enc_jwks)
     assert jwks2.to_jwks() == jwks.to_jwks()
 
     # the public JWKS from a private JWKS should match with a reconstructed public JWKS
-    pub_jwks = JWT.from_jwks(jwks.public_jwks())
+    pub_jwks = JOSE.from_jwks(jwks.public_jwks())
     assert json.dumps(pub_jwks.public_jwks()) == json.dumps(jwks.public_jwks())
 
 
 def test_jwt_sign_verify(keyset):
     sig_ks, enc_ks = keyset
-    jwks = JWT(sig_ks, enc_ks)
+    jwks = JOSE(sig_ks, enc_ks)
 
     # sign and verify raw data
     for alg in sig_alg:
@@ -74,7 +76,7 @@ def test_jwt_sign_verify(keyset):
         assert jwks.verify(token2)
 
     # sign with private jwks and verify with public jwks
-    pub_jwks = JWT.from_jwks(jwks.public_jwks())
+    pub_jwks = JOSE.from_jwks(jwks.public_jwks())
     for alg in [alg for alg in sig_alg if alg.name not in ('HS256', 'HS384', 'HS512')]:
         tk = Token(
             sub='Some Random Sub',
@@ -91,7 +93,7 @@ def test_jwt_sign_verify(keyset):
 
 def test_jwt_encrypt_decrypt(keyset):
     sig_ks, enc_ks = keyset
-    jwks = JWT(sig_ks, enc_ks)
+    jwks = JOSE(sig_ks, enc_ks)
 
     # encrypt and decrypt raw data
     for alg in enc_alg:
@@ -111,7 +113,7 @@ def test_jwt_encrypt_decrypt(keyset):
         assert jwks.decrypt(token)
 
     # sign with private jwks and verify with public jwks (RSA keys in this case)
-    pub_jwks = JWT.from_jwks(jwks.public_jwks())
+    pub_jwks = JOSE.from_jwks(jwks.public_jwks())
     for enc_jwk in pub_jwks.get_enc_jwks:
         assert enc_jwk.kty == 'RSA'
 
@@ -123,12 +125,11 @@ def test_jwt_encrypt_decrypt(keyset):
         assert jwks.decrypt(token)
 
 
-def test_jwks_encrpytion():
+def test_jwks_encryption():
     key = os.urandom(16)
 
-    jwks = JWT()
+    jwks = JOSE()
 
-    jwks2 = JWT.from_jwks(jwks.to_jwks(key),key)
+    jwks2 = JOSE.from_jwks(jwks.to_jwks(key), key)
 
     assert jwks.to_jwks() == jwks2.to_jwks()
-

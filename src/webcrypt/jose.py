@@ -133,7 +133,7 @@ class Token(BaseModel):
     azp: Optional[str]
 
 
-class JWT:
+class JOSE:
     """
     Encoder and decoder of JWT Tokens.
 
@@ -146,48 +146,52 @@ class JWT:
 
     """
     __slots__ = ('_options',
-                 '_sign_ks', '_sign_kid_lookup', '_sign_alg_lookup',
-                 '_encrypt_ks', '_encrypt_kid_lookup', '_encrypt_alg_lookup')
+                 '_sig_ks', '_sig_idx_kid', '_sig_idx_kid_priv', '_sig_idx_alg_priv',
+                 '_enc_ks', '_enc_idx_kid', '_enc_idx_alg')
 
     def __init__(self,
                  jws: Optional[JWS | List[JWS]] = None,
                  jwe: Optional[JWE | List[JWE]] = None):
 
-        self._sign_ks: List[JWS]
+        self._sig_ks: List[JWS]
+        self._enc_ks: List[JWE]
 
         if jws is None:
-            self._sign_ks = [JWS.random_jws()]
+            self._sig_ks = [JWS(JWS.Algorithm.RS256)]
         elif isinstance(jws, JWS):
-            self._sign_ks = [jws]
-        elif isinstance(jws, list):
-            self._sign_ks = list(jws)
+            self._sig_ks = [jws]
+        elif isinstance(jws, list) and all(isinstance(key, JWS) for key in jws):
+            self._sig_ks = list(jws)
         else:
-            raise ValueError("Unexected JWS Value")
+            raise ValueError("Unexpected/Invalid JWS Value")
 
-        self._sign_kid_lookup: Dict[str, JWS] = {x.kid: x for x in self._sign_ks}
-        self._sign_alg_lookup: DefaultDict[str, List[JWS]] = defaultdict(list)
+        self._sig_idx_kid: Dict[str, JWS] = {x.kid: x for x in self._sig_ks}
+        self._sig_idx_kid_priv: Dict[str, JWS] = {}
+        self._sig_idx_alg_priv: DefaultDict[str, List[JWS]] = defaultdict(list)
 
-        for jwk in self._sign_ks:
-            self._sign_alg_lookup[jwk.alg_name].append(jwk)
+        for jwk in self._sig_ks:
+            if jwk.can_sign:
+                self._sig_idx_kid_priv[jwk.kid] = jwk
+                self._sig_idx_alg_priv[jwk.alg_name].append(jwk)
 
         if jwe is None:
-            # hkey = wk.hmac_genkey(SHA256())
-            # self._jwk = JWK((hkey, None))
-            self._encrypt_ks = [JWE.random_jwe()]
+            self._enc_ks = [JWE(JWE.Algorithm.A256KW)]
         elif isinstance(jwe, JWE):
-            self._encrypt_ks = [jwe]
-        elif isinstance(jwe, list):
-            self._encrypt_ks = list(jwe)
+            self._enc_ks = [jwe]
+        elif isinstance(jwe, list) and all(isinstance(key, JWE) for key in jwe):
+            self._enc_ks = list(jwe)
+        else:
+            raise ValueError("Unexpected/Invalid JWE Value")
 
-        self._encrypt_kid_lookup: Dict[str, JWE] = {x.kid: x for x in self._encrypt_ks}
-        self._encrypt_alg_lookup: DefaultDict[str, List[JWE]] = defaultdict(list)
+        self._enc_idx_kid: Dict[str, JWE] = {x.kid: x for x in self._enc_ks}
+        self._enc_idx_alg: DefaultDict[str, List[JWE]] = defaultdict(list)
 
-        for jwk2 in self._encrypt_ks:
-            self._encrypt_alg_lookup[jwk2.alg_name].append(jwk2)
+        for jwk2 in self._enc_ks:
+            self._enc_idx_alg[jwk2.alg_name].append(jwk2)
 
     @classmethod
     def from_jwks(cls, jwks: str | Dict[str, Any],
-                  encryption_key: Optional[bytes] = None) -> "JWT":
+                  encryption_key: Optional[bytes] = None) -> "JOSE":
         if isinstance(jwks, str):
             if encryption_key is None:
                 try:
@@ -196,10 +200,10 @@ class JWT:
                     raise ValueError(
                         f"Invalid JWKS string: either corrupted, or encrypted: {ex}")
             else:
-                aesgcm = AESGCM(encryption_key)
+                aes_gcm = AESGCM(encryption_key)
                 try:
                     jwks_enc = conv.bytes_from_b64(jwks)
-                    jwks_json: bytes = aesgcm.decrypt(jwks_enc[:12], jwks_enc[12:], b'')
+                    jwks_json: bytes = aes_gcm.decrypt(jwks_enc[:12], jwks_enc[12:], b'')
                     jwks_dict = json.loads(jwks_json)
                 except Exception:
                     raise ValueError(
@@ -225,10 +229,10 @@ class JWT:
         ks: List[Dict[str, Any]] = []
         jwks = {'keys': ks}
 
-        for item in self._sign_ks:
+        for item in self._sig_ks:
             ks.append(item.to_jwk())
 
-        for item2 in self._encrypt_ks:
+        for item2 in self._enc_ks:
             ks.append(item2.to_jwk())
 
         jwks_json = json.dumps(jwks, indent=2)
@@ -237,8 +241,8 @@ class JWT:
             return jwks_json
         else:
             iv = os.urandom(12)
-            aesgcm = AESGCM(encryption_key)
-            ciphertext = aesgcm.encrypt(iv, jwks_json.encode(), b'')
+            aes_gcm = AESGCM(encryption_key)
+            ciphertext = aes_gcm.encrypt(iv, jwks_json.encode(), b'')
             jwks_enc = iv + ciphertext
             return conv.bytes_to_b64(jwks_enc)
 
@@ -247,30 +251,40 @@ class JWT:
         ks: List[Dict[str, Any]] = []
         jwks = {'keys': ks}
 
-        for jwk in self._sign_ks:
+        for jwk in self._sig_ks:
             if jwk.kty != 'oct':
                 ks.append(jwk.public_jwk())
 
         return jwks
 
-    def index_jwks(self) -> Dict[str, List[str]]:
-        cat = {}
+    def index_jwks(self) -> Dict[str, Dict[str, str]]:
+        cat: Dict[str, Any] = {}
 
-        for k1 in self._sign_alg_lookup:
-            cat[k1] = [jwk.kid for jwk in self._sign_alg_lookup[k1]]
+        for k1 in self._sig_ks:
+            cat[k1.kid] = {
+                'use': 'sig',
+                'kty': k1.kty,
+                'alg': k1.alg_name,
+                'can_sign': k1.can_sign
+            }
 
-        for k2 in self._encrypt_alg_lookup:
-            cat[k2] = [jwk.kid for jwk in self._encrypt_alg_lookup[k2]]
+        for k2 in self._enc_ks:
+            cat[k2.kid] = {
+                'use': 'enc',
+                'kty': k2.kty,
+                'alg': k2.alg_name,
+                'can_decrypt': k2.can_decrypt
+            }
 
         return cat
 
     @property
     def get_sig_jwks(self) -> List[JWS]:
-        return list(self._sign_ks)
+        return list(self._sig_ks)
 
     @property
     def get_enc_jwks(self) -> List[JWE]:
-        return list(self._encrypt_ks)
+        return list(self._enc_ks)
 
     def raw_sign(self, data: bytes,
                  extra_header: Optional[Dict[str, Any]] = None,
@@ -287,22 +301,22 @@ class JWT:
         :return: JWT encoded in Base64 unicode string
         """
         if kid is not None:
-            if kid in self._sign_kid_lookup:
-                jwk: JWS = self._sign_kid_lookup[kid]
+            if kid in self._sig_idx_kid_priv:
+                jwk: JWS = self._sig_idx_kid_priv[kid]
             else:
-                raise ValueError("This signing kid doesn't exist in this JWKS")
+                raise ValueError("No privkey with this signing kid exist in this JWKS")
 
         elif alg is not None:
             if isinstance(alg, JWS.Algorithm):
                 alg = alg.value
 
-            if alg in self._sign_alg_lookup:
-                jwk = choice(self._sign_alg_lookup[alg])
+            if alg in self._sig_idx_alg_priv:
+                jwk = choice(self._sig_idx_alg_priv[alg])
             else:
-                raise ValueError("This encrypting alg doesn't exist in this JWKS")
+                raise ValueError("No privkey with this signing alg exist in this JWKS")
 
         else:
-            jwk = choice(self._sign_ks)
+            jwk = choice(list(self._sig_idx_kid_priv.values()))
 
         return jwk.sign(payload=data,
                         extra_header=extra_header)
@@ -335,10 +349,10 @@ class JWT:
         except Exception as ex:
             raise tex.InvalidToken(f"Could not find/extract kid from JWT header: {ex}")
 
-        if kid not in self._sign_kid_lookup:
+        if kid not in self._sig_idx_kid:
             raise tex.TokenException(f"Could not find the JWK kid matching this token: {kid}")
 
-        jwk: JWS = self._sign_kid_lookup[kid]
+        jwk: JWS = self._sig_idx_kid[kid]
 
         payload_raw = jwk.verify(token)
 
@@ -360,21 +374,21 @@ class JWT:
         """
 
         if kid is not None:
-            if kid in self._encrypt_kid_lookup:
-                jwk: JWE = self._encrypt_kid_lookup[kid]
+            if kid in self._enc_idx_kid:
+                jwk: JWE = self._enc_idx_kid[kid]
             else:
-                raise ValueError("This encrypting kid doesn't exist in this JWKS")
+                raise ValueError("No key with this encrypting kid exist in this JWKS")
 
         elif alg is not None:
             if isinstance(alg, JWE.Algorithm):
                 alg = alg.value
-            if alg in self._encrypt_alg_lookup:
-                jwk = choice(self._encrypt_alg_lookup[alg])
+            if alg in self._enc_idx_alg:
+                jwk = choice(self._enc_idx_alg[alg])
             else:
-                raise ValueError("This encrypting alg doesn't exist in this JWKS")
+                raise ValueError("No key with this encrypting alg exist in this JWKS")
 
         else:
-            jwk = choice(self._encrypt_ks)
+            jwk = choice(self._enc_ks)
 
         return jwk.encrypt(data,
                            compress=compress, extra_header=extra_header)
@@ -398,10 +412,13 @@ class JWT:
         except Exception as ex:
             raise tex.InvalidToken(f"Could not find/extract kid from JWT header: {ex}")
 
-        if kid not in self._encrypt_kid_lookup:
+        if kid not in self._enc_idx_kid:
             raise tex.TokenException(f"Could not find the JWK kid matching this token: {kid}")
 
-        jwk: JWE = self._encrypt_kid_lookup[kid]
+        jwk: JWE = self._enc_idx_kid[kid]
+
+        if not jwk.can_decrypt:
+            raise ValueError("This JWK is not capable of decrypting: No privkey")
 
         payload_raw = jwk.decrypt(token)
 
@@ -420,25 +437,27 @@ class JWT:
         :param access_token: Optional access token to calculate and include the at_hash JWT claim
         :param extra_header: Optional dict of extra JWT headers
         :param kid: Optional kid of the signing key to use, if present.
-        :param alg: Optional algo if the siging kid to use, if present
+        :param alg: Optional algo if the signing kid to use, if present
 
         :return: encoded JWT in Base64 unicode string
         """
         if kid is not None:
-            if kid in self._sign_kid_lookup:
-                jwk: JWS = self._sign_kid_lookup[kid]
+            if kid in self._sig_idx_kid_priv:
+                jwk: JWS = self._sig_idx_kid_priv[kid]
             else:
-                raise ValueError("This signing kid doesn't exist in this JWKS")
+                raise ValueError("No privkey with this signing kid exist in this JWKS")
 
         elif alg is not None:
             if isinstance(alg, JWS.Algorithm):
                 alg = alg.value
-            if alg in self._sign_alg_lookup:
-                jwk = choice(self._sign_alg_lookup[alg])
+
+            if alg in self._sig_idx_alg_priv:
+                jwk = choice(self._sig_idx_alg_priv[alg])
             else:
-                raise ValueError("This encrypting alg doesn't exist in this JWKS")
+                raise ValueError("No privkey with this signing alg exist in this JWKS")
+
         else:
-            jwk = choice(self._sign_ks)
+            jwk = choice(list(self._sig_idx_kid_priv.values()))
 
         if access_token is not None:
             token.at_hash = self.at_hash(access_token, jwk)
@@ -485,10 +504,10 @@ class JWT:
         except Exception as ex:
             raise tex.InvalidToken(f"Could not find/extract kid from JWT header: {ex}")
 
-        if kid not in self._sign_kid_lookup:
+        if kid not in self._sig_idx_kid:
             raise tex.TokenException(f"Could not find the JWK kid matching this token: {kid}")
 
-        jwk: JWS = self._sign_kid_lookup[kid]
+        jwk: JWS = self._sig_idx_kid[kid]
 
         payload_raw = jwk.verify(token)
 
@@ -496,14 +515,14 @@ class JWT:
         try:
             # validate signature and decode token
             payload: Dict[str, Any] = conv.doc_from_bytes(payload_raw)
-            ptoken = TokenClass(**payload)
+            p_token = TokenClass(**payload)
         except Exception as ex:
             raise tex.InvalidClaims(f"invalid or missing claims from the defined schema: {ex}")
 
-        JWT._verify_at_hash(ptoken, access_token, jwk)
-        JWT._verify_time_claims(ptoken)
+        JOSE._verify_at_hash(p_token, access_token, jwk)
+        JOSE._verify_time_claims(p_token)
 
-        return ptoken
+        return p_token
 
     def encrypt(self, token: Token, compress=True,
                 extra_header: Optional[Dict[str, Any]] = None,
@@ -511,21 +530,21 @@ class JWT:
                 alg: Optional[str | JWE.Algorithm] = None) -> str:
 
         if kid is not None:
-            if kid in self._encrypt_kid_lookup:
-                jwk: JWE = self._encrypt_kid_lookup[kid]
+            if kid in self._enc_idx_kid:
+                jwk: JWE = self._enc_idx_kid[kid]
             else:
-                raise ValueError("This encrypting kid doesn't exist in this JWKS")
+                raise ValueError("No key with this encrypting kid exist in this JWKS")
 
         elif alg is not None:
             if isinstance(alg, JWE.Algorithm):
                 alg = alg.value
-            if alg in self._encrypt_alg_lookup:
-                jwk = choice(self._encrypt_alg_lookup[alg])
+            if alg in self._enc_idx_alg:
+                jwk = choice(self._enc_idx_alg[alg])
             else:
-                raise ValueError("This encrypting alg doesn't exist in this JWKS")
+                raise ValueError("No key with this encrypting alg exist in this JWKS")
 
         else:
-            jwk = choice(self._encrypt_ks)
+            jwk = choice(self._enc_ks)
 
         return jwk.encrypt(token.json(exclude_none=True).encode(),
                            compress=compress, extra_header=extra_header)
@@ -561,10 +580,13 @@ class JWT:
         except Exception as ex:
             raise tex.InvalidToken(f"Could not find/extract kid from JWT header: {ex}")
 
-        if kid not in self._encrypt_kid_lookup:
+        if kid not in self._enc_idx_kid:
             raise tex.TokenException(f"Could not find the JWK kid matching this token: {kid}")
 
-        jwk: JWE = self._encrypt_kid_lookup[kid]
+        jwk: JWE = self._enc_idx_kid[kid]
+
+        if not jwk.can_decrypt:
+            raise ValueError("This JWK is not capable of decrypting: No privkey")
 
         payload_raw = jwk.decrypt(token)
 
@@ -572,13 +594,13 @@ class JWT:
         try:
             # validate signature and decode token
             payload: Dict[str, Any] = conv.doc_from_bytes(payload_raw)
-            ptoken = TokenClass(**payload)
+            p_token = TokenClass(**payload)
         except Exception as ex:
             raise tex.InvalidClaims(f"invalid or missing claims from the defined schema: {ex}")
 
-        JWT._verify_time_claims(ptoken)
+        JOSE._verify_time_claims(p_token)
 
-        return ptoken
+        return p_token
 
     @staticmethod
     def _verify_at_hash(token: Token, access_token: Union[str, None], jwk: JWS):
@@ -588,7 +610,7 @@ class JWT:
                     raise tex.InvalidClaims("at_hash is present but access_token "
                                             "was not provided")
                 else:
-                    _at_hash = JWT.at_hash(access_token, jwk)
+                    _at_hash = JOSE.at_hash(access_token, jwk)
                     if token.at_hash != _at_hash:
                         raise tex.InvalidClaims("Invalid at_hash against given access_token")
             if token.at_hash is None and access_token is not None:

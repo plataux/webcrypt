@@ -19,5 +19,13 @@ High level Constructs for Web App cryptography and JOSE spec implementation
 * Move the ts_offset() function as a static method in the Token class
 * remove the ts_now() method
 
-``pip install "git+https://github.com/plataux/webcrypt@v0.5.0"``
+
+## Version 0.6.0
+
+* Rename JWT Class to JOSE
+* add the can_sign and can_encrypt property to JWS and JWE Classes
+* Fix bug associated with JOSE Module attempting to sign or decrypt with public keys
+* improve index_jwks JOSE method
+
+``pip install "git+https://github.com/plataux/webcrypt@v0.6.0"``
 

@@ -556,6 +556,10 @@ class JWS:
             raise RuntimeError("unexpected kty")
 
     @property
+    def can_sign(self) -> bool:
+        return self._can_sign
+
+    @property
     def privkey(self) -> Union[bytes, rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey]:
         if self._kty == 'oct':
             return self._hmac_key

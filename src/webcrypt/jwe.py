@@ -726,24 +726,32 @@ class JWE:
             raise RuntimeError("unreachable expected")
 
     @property
+    def can_decrypt(self) -> bool:
+        try:
+            bool(self.privkey)
+            return True
+        except ValueError:
+            return False
+
+    @property
     def privkey(self) -> Union[bytes, rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey]:
         if self._kty == 'oct' and self._key is not None:
             return self._key
 
         elif self._kty == 'RSA':
             if not self._rsa_privkey:
-                raise RuntimeError("unreachable expected")
+                raise ValueError("This JWE has not private component")
 
             return self._rsa_privkey
 
         elif self._kty == 'EC':
             if not self._ec_privkey:
-                raise RuntimeError("unreachable expected")
+                raise ValueError("This JWE has not private component")
 
             return self._ec_privkey
 
         else:
-            raise RuntimeError("unreachable expected")
+            raise RuntimeError(f"Unexpected kty {self._kty}")
 
     @property
     def pubkey(self) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
