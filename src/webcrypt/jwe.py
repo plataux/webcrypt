@@ -133,11 +133,6 @@ JWE_Header.update_forward_refs()
 
 class JWE:
     class Algorithm(enum.Enum):
-        # RSA Key Wrapping of cek
-        RSA1_5 = 'RSA1_5'
-        RSA_OAEP = 'RSA-OAEP'
-        RSA_OAEP_256 = 'RSA-OAEP-256'
-
         # Direct Encryption
         DIR = "dir"
 
@@ -151,13 +146,18 @@ class JWE:
         A192GCMKW = "A192GCMKW"
         A256GCMKW = "A256GCMKW"
 
-        # ECDH Ephemeral Static Key Key Derivation between two parties
-        ECDH_ES = "ECDH-ES"
-
         # Password Based Encryption
         PBES2_HS256_A128KW = "PBES2-HS256+A128KW"
         PBES2_HS384_A192KW = "PBES2-HS384+A192KW"
         PBES2_HS512_A256KW = "PBES2-HS512+A256KW"
+
+        # RSA Key Wrapping of cek
+        RSA1_5 = 'RSA1_5'
+        RSA_OAEP = 'RSA-OAEP'
+        RSA_OAEP_256 = 'RSA-OAEP-256'
+
+        # ECDH Ephemeral Static Key Key Derivation between two parties
+        ECDH_ES = "ECDH-ES"
 
         # ECDH-ES with key wrapping
         ECDH_ES_A128KW = "ECDH-ES+A128KW"
