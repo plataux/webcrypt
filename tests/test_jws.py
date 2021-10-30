@@ -49,3 +49,14 @@ def test_all_algo_ops(algo: JWS.Algorithm):
         sk2 = JWS(algorithm=algo, key_obj=sk1.privkey)
     token = sk1.sign(data)
     sk2.verify(token)
+
+
+def test_random_alg():
+    for _ in range(32):
+        sk1 = JWS.random_jws()
+        data = b'Some Random data to be signed and verified'
+
+        # sign and verify
+
+        token = sk1.sign(data)
+        sk1.verify(token)

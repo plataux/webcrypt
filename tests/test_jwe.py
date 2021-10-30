@@ -1,9 +1,13 @@
+import random
+
 import pytest
 
 from webcrypt.jwe import JWE
 import json
 
 # from typing import Dict
+
+import webcrypt.convert as conv
 import os
 
 
@@ -38,30 +42,17 @@ def test_jwe_conversions(algo: JWE.Algorithm):
     ek2 = JWE.from_jwk(ek1.to_jwk())
     assert json.dumps(ek1.to_jwk()) == json.dumps(ek2.to_jwk())
 
-    # # to and from pem
-    ek2 = JWE.from_pem(ek1.to_pem(), algorithm=algo)
-    assert ek1.to_pem() == ek2.to_pem()
-    #
-    # to and from key objects
-    ek2 = JWE(algo, encryption=None, key=ek1.privkey)
-    assert ek1.to_pem() == ek2.to_pem()
-    #
-    # data = b'Some Random data to be encrypted and decrypted'
+    if algo.value != 'dir':
+        # to and from pem
+        ek2 = JWE.from_pem(ek1.to_pem(), algorithm=algo)
+        assert ek1.to_pem() == ek2.to_pem()
 
-    # sign and verify
-
-    # token = ek1.encrypt(data)
-    # ek1.decrypt(token)
+        #
+        # to and from key objects
+        ek2 = JWE(algo, encryption=None, key=ek1.privkey)
+        assert ek1.to_pem() == ek2.to_pem()
     #
-    # sign, and a separate public key object to verify
-
-    # if algo.name not in ('HS256', 'HS384', 'HS512'):
-    #     ek2 = JWE(algorithm=algo, key_obj=ek1.pubkey)
-    # else:
-    #     ek2 = JWE(algorithm=algo, key_obj=ek1.privkey)
-    #
-    # token = ek1.encrypt(data)
-    # ek1.decrypt(token)
+    # data = b'Some Random data to be encrypted and decrypted
 
 
 def test_jwe_defaults():
@@ -89,9 +80,8 @@ def test_dir_ops(enc):
 
     # test existing keys without specifying encryption algos
     k = os.urandom(_aes_alg_size[enc.name])
-    ek = JWE(JWE.Algorithm.DIR, key=k)
-    assert ek.key == k
-    assert ek.alg_name == 'dir' and ek.enc_name == enc.name
+    with pytest.raises(ValueError):
+        JWE(JWE.Algorithm.DIR, key=k)
 
     # test invalid AES keys
     k = os.urandom(_aes_alg_size[enc.name]) + b'x'
@@ -101,7 +91,7 @@ def test_dir_ops(enc):
     k = os.urandom(_aes_alg_size[enc.name])[:-1]
     with pytest.raises(ValueError):
         JWE(JWE.Algorithm.DIR, key=k)
-
+    #
     # test valid keys that contradict specified encryption algorithm
     valid_sizes = [16, 24, 32]
     enc_size = _aes_alg_size[enc.name]
@@ -110,7 +100,7 @@ def test_dir_ops(enc):
         k = os.urandom(v)
         with pytest.raises(ValueError):
             JWE(JWE.Algorithm.DIR, encryption=enc, key=k)
-
+    #
     # test encrypt and decrypt with and without compression
     ek = JWE(JWE.Algorithm.DIR, encryption=enc)
 
@@ -187,3 +177,35 @@ def test_ecdh_2(alg):
     data_enc = k1.encrypt(data, compress=True, extra_header={'cty': 'binary'})
 
     assert k2.decrypt(data_enc) == data
+
+
+def test_pbe():
+    for alg in [JWE.Algorithm.PBES2_HS384_A192KW,
+                JWE.Algorithm.PBES2_HS256_A128KW, JWE.Algorithm.PBES2_HS512_A256KW]:
+
+        for enc in list(JWE.Encryption):
+            passphrase = conv.bytes_to_b64(os.urandom(random.randint(30, 100)))
+            passphrase = None if random.choice((True, False)) else passphrase
+
+            jwe = JWE(algorithm=alg, encryption=enc, key=passphrase)
+
+            jwe2 = JWE.from_jwk(jwe.to_jwk())
+
+            assert json.dumps(jwe.to_jwk()) == json.dumps(jwe2.to_jwk())
+
+            data = conv.bytes_to_b64(os.urandom(random.randint(100, 500))).encode()
+
+            token = jwe.encrypt(data)
+
+            head = JWE.decode_header(token)
+
+            assert head['enc'] == enc.value
+            assert head['alg'] == alg.value
+
+            if 'CBC' in head['enc']:
+                assert 'p2s' in head
+                assert 'p2c' in head
+
+            assert data == jwe2.decrypt(token)
+
+

@@ -187,7 +187,7 @@ class JWS:
                  '_ec_pubkey', '_ec_privkey', '_ec_size', '_crv', '_can_sign',
                  '_rsa_pubkey', '_rsa_privkey', '_rsa_pad')
 
-    def __init__(self, algorithm: Union[JWS.Algorithm, None],
+    def __init__(self, algorithm: Union[JWS.Algorithm, None] = None,
                  key_obj: Optional[jws_kty] = None,
                  kid: Optional[str] = None):
 
