@@ -595,6 +595,10 @@ class JWE:
         self._jwe_header.enc = self._enc_name
         self._jwe_header.kid = self._kid
 
+    def __str__(self) -> str:
+        priv_pub = "private" if self.can_decrypt else "public"
+        return f"{self.kty} | {self.alg_name} | {self.enc_name} | {self.kid} | {priv_pub}"
+
     @classmethod
     def from_jwk(cls, jwk: Dict[str, Any]):
 
