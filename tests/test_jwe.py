@@ -238,4 +238,3 @@ def test_key_wrappers(alg):
         assert head['enc'] == enc.value
 
         assert data == jwe.decrypt(token)
-

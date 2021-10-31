@@ -598,8 +598,8 @@ class JWS:
         return self._kty
 
     def __str__(self) -> str:
-        privpub = "private" if self._can_sign else "public"
-        return f"{self.kty} | {self.alg_name} | {self.kid} | {privpub}"
+        priv_pub = "private" if self._can_sign else "public"
+        return f"{self.kty} | {self.alg_name} | {self.kid} | {priv_pub}"
 
     def __repr__(self) -> str:
         return str(self)
