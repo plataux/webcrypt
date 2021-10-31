@@ -246,14 +246,12 @@ class JWE:
         padded_data += padder.finalize()
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
 
-        hmac_signer = hmac.HMAC(hmac_key, hash_alg)
-
         # The octet string AL is equal to the number of bits in the
         # Additional Authenticated Data A expressed as a 64-bit unsigned big-endian integer
         al = conv.int_to_bytes(len(auth_data) * 8, order='big', byte_size=8)
 
+        hmac_signer = hmac.HMAC(hmac_key, hash_alg)
         hmac_signer.update(auth_data + iv + ciphertext + al)
-
         tag = hmac_signer.finalize()[:key_len]
 
         return iv, ciphertext, tag
@@ -289,7 +287,7 @@ class JWE:
         sig = hmac_signer.finalize()
 
         if sig[:key_len] != tag:
-            raise tex.InvalidSignature("Tag invalid")
+            raise tex.InvalidSignature("Tag invalid - Token Fabricated or Tampered With")
 
         cipher = Cipher(algorithms.AES(enc_key), modes.CBC(iv))
 
@@ -325,7 +323,14 @@ class JWE:
 
         keylen = int(JWE._alg_size[jwe_alg] * 8)
 
-        hash_alg = hashes.SHA256()
+        if keylen <= 256:
+            hash_alg: hashes.HashAlgorithm = hashes.SHA256()
+        elif keylen == 384:
+            hash_alg = hashes.SHA384()
+        elif keylen == 512:
+            hash_alg = hashes.SHA512()
+        else:
+            raise ValueError("unexpected keylen")
 
         concat = []
 
@@ -370,21 +375,21 @@ class JWE:
     }
 
     _alg_size = {
-        'A128GCMKW': 16,
-        'A192GCMKW': 24,
-        'A256GCMKW': 32,
         'A128KW': 16,
         'A192KW': 24,
         'A256KW': 32,
+        'A128GCMKW': 16,
+        'A192GCMKW': 24,
+        'A256GCMKW': 32,
+        'PBES2-HS256+A128KW': 16,
+        'PBES2-HS384+A192KW': 24,
+        'PBES2-HS512+A256KW': 32,
         'A128GCM': 16,
         'A192GCM': 24,
         'A256GCM': 32,
-        "A128CBC-HS256": 32,
-        "A192CBC-HS384": 48,
-        "A256CBC-HS512": 64,
-        "PBES2-HS256+A128KW": 16,
-        "PBES2-HS384+A192KW": 24,
-        "PBES2-HS512+A256KW": 32
+        'A128CBC-HS256': 32,
+        'A192CBC-HS384': 48,
+        'A256CBC-HS512': 64
     }
 
     _pbe_hash = {
@@ -409,7 +414,8 @@ class JWE:
             key = os.urandom(JWE._alg_size[jwe_enc.value])
 
         elif key is not None and jwe_enc is None:
-            raise ValueError("If a dir key is provided, an enc algorithm must explicitly be specified")
+            raise ValueError(
+                "If a dir key is provided, an enc algorithm must explicitly be specified")
 
         # both key and jwe_enc are provided
         else:
@@ -1112,7 +1118,6 @@ class JWE:
 
     def _decrypt_aeskw(self, header_enc, header, cek_wrapped, iv, ciphertext, tag) -> bytes:
         cek = aes_key_unwrap(self._key, cek_wrapped)
-
         return self._decrypt_common(header, cek, header_enc, iv, ciphertext, tag)
 
     def _encrypt_gcmkw(self, plaintext: bytes, compress=True,
@@ -1221,14 +1226,14 @@ class JWE:
         if None in (self._ec_derkey, self._apu, self._apv, self._party_u):
             raise RuntimeError("ECDH-ES Key derivation hasn't happened yet")
 
-        kx: Any = self._ec_derkey
+        assert self._ec_derkey is not None
 
         if self._alg_name == 'ECDH-ES':
-            cek = kx
+            cek = self._ec_derkey
             cek_wrapped = b''
         else:
             cek = os.urandom(self._cek_size)
-            cek_wrapped = aes_key_wrap(kx, cek)
+            cek_wrapped = aes_key_wrap(self._ec_derkey, cek)
 
         header: JWE_Header = self._jwe_header.copy()
         header.apu = self._apu
