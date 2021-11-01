@@ -300,6 +300,10 @@ class JOSE:
 
         :return: JWT encoded in Base64 unicode string
         """
+
+        if len(self._sig_idx_kid_priv) == 0:
+            raise RuntimeError("This JOSE Object isn't capable of signing - No Private keys")
+
         if kid is not None:
             if kid in self._sig_idx_kid_priv:
                 jwk: JWS = self._sig_idx_kid_priv[kid]
@@ -373,6 +377,9 @@ class JOSE:
         :return:
         """
 
+        if len(self._enc_ks) == 0:
+            raise RuntimeError("This JOSE object has no JWE keys")
+
         if kid is not None:
             if kid in self._enc_idx_kid:
                 jwk: JWE = self._enc_idx_kid[kid]
@@ -415,6 +422,9 @@ class JOSE:
         if kid not in self._enc_idx_kid:
             raise tex.TokenException(f"Could not find the JWK kid matching this token: {kid}")
 
+        if kid not in self._enc_idx_kid:
+            raise RuntimeError(f"no JWE decryption key with this kid was found: {kid}")
+
         jwk: JWE = self._enc_idx_kid[kid]
 
         if not jwk.can_decrypt:
@@ -441,6 +451,10 @@ class JOSE:
 
         :return: encoded JWT in Base64 unicode string
         """
+
+        if len(self._sig_idx_kid_priv) == 0:
+            raise RuntimeError("This JOSE Object isn't capable of signing - No Private keys")
+
         if kid is not None:
             if kid in self._sig_idx_kid_priv:
                 jwk: JWS = self._sig_idx_kid_priv[kid]
@@ -528,6 +542,9 @@ class JOSE:
                 extra_header: Optional[Dict[str, Any]] = None,
                 kid: Optional[str] = None,
                 alg: Optional[str | JWE.Algorithm] = None) -> str:
+
+        if len(self._enc_ks) == 0:
+            raise RuntimeError("This JOSE object has no JWE keys")
 
         if kid is not None:
             if kid in self._enc_idx_kid:

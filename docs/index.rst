@@ -15,6 +15,7 @@ Highlevel APIs for Web App cryptography, security and password management
 
    contents/keys.rst
    contents/jwt.rst
+   contents/jwe.rst
 
 
 Indices and tables

@@ -48,8 +48,6 @@ from cryptography.hazmat.primitives.keywrap import aes_key_wrap, aes_key_unwrap
 
 from cryptography.hazmat.primitives.ciphers.algorithms import AES
 
-from cryptography.exceptions import InvalidTag
-
 import webcrypt.convert as conv
 import webcrypt.exceptions as tex
 
@@ -174,7 +172,19 @@ class JWE:
         A256CBC_HS512 = "A256CBC-HS512"
 
     @staticmethod
-    def gcm_encrypt(key: bytes, auth_data: bytes, data: bytes) -> Tuple[bytes, bytes, bytes]:
+    def gcm_encrypt(key: bytes, auth_data: bytes,
+                    plaintext: bytes) -> Tuple[bytes, bytes, bytes]:
+        """
+        Implementation according to the spec at:
+        https://datatracker.ietf.org/doc/html/rfc7518#section-5.3
+
+        :param key: 128, 192 or 256 bit key in byte string form
+        :param auth_data: Authenticated Data in byte string form
+        :param plaintext: The data to be encrypted in byte string form
+        :return: A tuple of the iv, ciphertext, tag all in byte form
+        """
+
+        # Use of an IV of size 96 bits is REQUIRED with this algorithm.
         iv = os.urandom(12)
 
         # Construct an AES-GCM Cipher object with the given key and a
@@ -190,38 +200,68 @@ class JWE:
 
         # Encrypt the plaintext and get the associated ciphertext.
         # GCM does not require padding.
-        ciphertext = encryptor.update(data) + encryptor.finalize()
+        ciphertext = encryptor.update(plaintext) + encryptor.finalize()
+
+        # The requested size of the Authentication Tag output MUST be 128 bits,
+        # regardless of the key size.
+        assert len(encryptor.tag) == 16
 
         return iv, ciphertext, encryptor.tag
 
     @staticmethod
     def gcm_decrypt(key: bytes, auth_data: bytes,
                     iv: bytes, ciphertext: bytes, tag: bytes) -> bytes:
-        # Construct a Cipher object, with the key, iv, and additionally the
-        # GCM tag used for authenticating the message.
-        decryptor = Cipher(
-            AES(key),
-            GCM(iv, tag),
-        ).decryptor()
+        """
+        Implementation according to the spec at:
+        https://datatracker.ietf.org/doc/html/rfc7518#section-5.3
 
-        # We put associated_data back in or the tag will fail to verify
-        # when we finalize the decryptor.
-        decryptor.authenticate_additional_data(auth_data)
+        :param key: 128, 192 or 256 AES key in byte string
+        :param auth_data: Authenticated data in byte string
+        :param iv: Initialization Vector - expecting 96 bits length
+        :param ciphertext: encrypted data in bytes
+        :param tag: 128 bit tag
+        :return: plaintext if decryption if successful
 
-        # Decryption gets us the authenticated plaintext.
-        # If the tag does not match an InvalidTag exception will be raised.
+        :raises InvalidToken: if the any of the inputs is invalid, corrupted or tampered with
+        """
+
         try:
+            # Construct a Cipher object, with the key, iv, and additionally the
+            # GCM tag used for authenticating the message.
+            decryptor = Cipher(
+                AES(key),
+                GCM(iv, tag),
+            ).decryptor()
+
+            # We put associated_data back in or the tag will fail to verify
+            # when we finalize the decryptor.
+            decryptor.authenticate_additional_data(auth_data)
+
+            # Decryption gets us the authenticated plaintext.
+            # If the tag does not match an InvalidTag exception will be raised.
+
             ct: bytes = decryptor.update(ciphertext) + decryptor.finalize()
-        except InvalidTag as ex:
+        except Exception as ex:
             raise tex.InvalidToken(f"Could not decrypt token, corrupted or tampered with: {ex}")
         return ct
 
     @staticmethod
     def cbc_encrypt(comp_key: bytes, auth_data: bytes,
-                    data: bytes) -> Tuple[bytes, bytes, bytes]:
+                    plaintext: bytes) -> Tuple[bytes, bytes, bytes]:
+        """
+        Implemented according to the spec at:
+        https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.2.1
+
+
+        :param comp_key: Composite Key: the 1st half for HMAC Authentication,
+            and the 2nd for Content Encryption
+        :param auth_data: Authenticated Data in bytes
+        :param plaintext: data to be encrypted in bytes
+        :return: a tuple of iv, ciphertext, tag all in bytes format
+        """
 
         if len(comp_key) not in (32, 48, 64):
-            raise ValueError("CBC key must be in 32, 36, 64 bytes long")
+            raise ValueError("CBC key must be in 32, 48, 64 bytes long")
 
         key_len = len(comp_key) // 2
 
@@ -237,12 +277,14 @@ class JWE:
         else:
             raise RuntimeError("unexpected key_len value")
 
+        # The IV used is a 128-bit value generated randomly or
+        # pseudo-randomly for use in the cipher.
         iv = os.urandom(16)
 
         cipher = Cipher(algorithms.AES(enc_key), modes.CBC(iv))
         encryptor = cipher.encryptor()
         padder = PKCS7(algorithms.AES.block_size).padder()
-        padded_data = padder.update(data)
+        padded_data = padder.update(plaintext)
         padded_data += padder.finalize()
         ciphertext = encryptor.update(padded_data) + encryptor.finalize()
 
@@ -259,6 +301,20 @@ class JWE:
     @staticmethod
     def cbc_decrypt(comp_key: bytes, auth_data: bytes,
                     iv: bytes, ciphertext: bytes, tag: bytes) -> bytes:
+        """
+        Implemented according to the spec at:
+        https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.2.2
+
+        :param comp_key: Composite Key: 1st half for HMAC, and 2nd for Content Decryption
+        :param auth_data: Authenticated Data in bytes
+        :param iv: Initialization Vector in bytes - expecting 128 bit iv
+        :param ciphertext: Ciphertext in bytes
+        :param tag: Auth tag in bytes
+        :return: decrypted plaintext
+
+        :raises InvalidSignature: If the tag is invalid
+        :raises InvalidToken: If any of the inputs is invalid, corrupted or tampered with in any way
+        """
 
         if len(comp_key) not in (32, 48, 64):
             raise ValueError("CBC key must be in 32, 36, 64 bytes long")
@@ -289,16 +345,20 @@ class JWE:
         if sig[:key_len] != tag:
             raise tex.InvalidSignature("Tag invalid - Token Fabricated or Tampered With")
 
-        cipher = Cipher(algorithms.AES(enc_key), modes.CBC(iv))
+        try:
+            cipher = Cipher(algorithms.AES(enc_key), modes.CBC(iv))
 
-        decryptor = cipher.decryptor()
-        padded_plain_text = decryptor.update(ciphertext)
-        padded_plain_text += decryptor.finalize()
-        de_padder = PKCS7(algorithms.AES.block_size).unpadder()
-        plaintext: bytes = de_padder.update(padded_plain_text)
-        plaintext += de_padder.finalize()
+            decryptor = cipher.decryptor()
+            padded_plain_text = decryptor.update(ciphertext)
+            padded_plain_text += decryptor.finalize()
+            de_padder = PKCS7(algorithms.AES.block_size).unpadder()
+            plaintext: bytes = de_padder.update(padded_plain_text)
+            plaintext += de_padder.finalize()
 
-        return plaintext
+            return plaintext
+        except Exception as ex:
+            raise tex.TokenException(
+                f"Could not decrypt token, corrupted or tampered with: {ex}")
 
     @staticmethod
     def concat_kdf(
@@ -308,6 +368,7 @@ class JWE:
             apv: str = 'Bob',
             hash_rounds: int = 1) -> bytes:
         """
+        Implemented following the example computation at:
         https://datatracker.ietf.org/doc/html/rfc7518#appendix-C
 
         :param shared_key:
@@ -599,8 +660,21 @@ class JWE:
         priv_pub = "private" if self.can_decrypt else "public"
         return f"{self.kty} | {self.alg_name} | {self.enc_name} | {self.kid} | {priv_pub}"
 
+    def __repr__(self) -> str:
+        return str(self)
+
     @classmethod
     def from_jwk(cls, jwk: Dict[str, Any]):
+        """
+        Load a JWE key from JWK dict format. The following items are required;
+
+        * the "use" element whose value must be ``enc``
+        * the "kty", "alg" and "enc" dict keys must be present, and valid for a JWE key
+
+        :param jwk: dict of JWE key parameters
+        :return: a valid JWE object based on the provided JWK
+        :raises ValueError: if any of the JWK parameters are missing, or invalid
+        """
 
         if 'use' in jwk and (_use := jwk['use']) != 'enc':
             raise ValueError(
@@ -1153,7 +1227,7 @@ class JWE:
                      extra_header: Optional[Dict[str, Any]] = None) -> str:
 
         salt = os.urandom(16)
-        count = random.randint(1024, 3096)
+        count = random.randint(1024, 4096)
 
         hash_alg = JWE._pbe_hash[self._alg_name]
 

@@ -33,12 +33,14 @@ This project borrows ideas from, and is inspired by other Python libraries inclu
   * All HMAC algorithms: ``HS256``, ``HS384``, ``HS512``
   * All RSA algorithms: ``RS256``, ``RS384``, ``RS512`` and ``PS256``, ``PS384``, ``PS512``
   * All Elliptic Curve Algorithms: ``ES256``, ``ES384``, ``ES512``
-  * Leaving out ``none`` algorithm
+  * Leaving out only ``none`` algorithm for JWT signatures
 
-* Support for most of the JWE Encryption and Key Wrapping Algorithms https://datatracker.ietf.org/doc/html/rfc7518#section-4.1:
-  * direct ``dir`` encryption: ``A128GCM``, ``A192GCM`` and ``A256GCM``
+* Support for all the JWE Encryption and Key Wrapping Algorithms https://datatracker.ietf.org/doc/html/rfc7518#section-4.1:
+  * All content encryption algorithms: ``A128GCM``, ``A192GCM``, ``A256GCM``, ``A128CBC-HS256``, ``A192CBC-HS384``, ``A256CBC-HS512``
+  * direct ``dir`` encryption using any of the Encryption Algorithms defined by the standard
   * AES key wrapping of a newly, randomly Generated CEK: ``A128KW``, ``A192KW`` and ``A256KW``
   * AES-GCM encryption of a newly, randomly generated CEK: ``A128GCMKW``, ``A192GCMKW`` and ``A256GCMKW``
+  * Password-Based Encryption algorithms: ``PBES2-HS256+A128KW``, ``PBES2-HS384+A192KW``, ``PBES2-HS512+A256KW``
   * RSA key wrapping of CEKs: ``RSA1_5``, ``RSA-OAEP`` and ``RSA-OAEP-256``
   * ECDH-ES key derivation for direct use, or wrapping of a CEK: ``ECDH-ES``, ``ECDH-ES+A128KW``, ``ECDH-ES+A192KW``, ``ECDH-ES+A256KW``
 
@@ -66,7 +68,9 @@ token: str = signer.sign(payload)
 
 print(token)
 # will produce something like this
-# eyJhbGciOiJFUzI1NiIsImt0eSI6IkVDIiwia2lkIjoiZWFjNTgyMWMtZDQ3Yi00ZTA4LWEwMTMtOWQxOWUzNmNkNGRkIn0.RGF0YSB0byBiZSBzaWduZWQgYW5kIHZlcmlmaWVk.tvQcT6S33H9auuGqNyYm_VHsA8I0Bw6NaLGi6plJCwmnr9oKXS78lZYI9ndlju6dnNXdP3nCAxZuyR9I0vxS-A
+# eyJhbGciOiJFUzI1NiIsImt0eSI6IkVDIiwia2lkIjoiZWFjNTgyMWMtZDQ3Yi00ZTA4LWEwMTMtOWQxOWUzNmNkNGRkIn0.
+# RGF0YSB0byBiZSBzaWduZWQgYW5kIHZlcmlmaWVk.tvQcT6S33H9auuGqNyYm_VHsA8I0Bw6NaLGi6plJCwmnr9oKXS78lZYI
+# 9ndlju6dnNXdP3nCAxZuyR9I0vxS-A
 
 decoded_payload = signer.verify(token)
 
@@ -225,11 +229,11 @@ a newly created CEK (Content Encryption Key)
 from webcrypt.jwe import JWE
 import json
 
-# generate a new 128-bit key used directly in content Encryption
-jwk1 = JWE(algorithm=JWE.Algorithm.DIR, encryption=JWE.Encryption.A128GCM)
+# generate a new 192-bit key used directly in content Encryption
+jwk1 = JWE(algorithm=JWE.Algorithm.DIR, encryption=JWE.Encryption.A192GCM)
 
-# generate a new 256-bit key used directly in content Encryption
-jwk2 = JWE(algorithm=JWE.Algorithm.DIR, encryption=JWE.Encryption.A256GCM)
+# generate a new 256-bit key used directly in content Encryption + HMAC Authentication
+jwk2 = JWE(algorithm=JWE.Algorithm.DIR, encryption=JWE.Encryption.A128CBC_HS256)
 
 # export jwk1:
 print(json.dumps(jwk1.to_jwk(),indent=4))
@@ -271,8 +275,8 @@ import json
 # Generate a 192-bit private key to wrap a 256-bit CEK for encrypting and decrypting data
 jwk1 = JWE(algorithm=JWE.Algorithm.A192KW, encryption=JWE.Encryption.A256GCM)
 
-# Generate a 256-bit private key to encrypt and wrap a 128-bit CEK for encrypting and decrypting data
-jwk2 = JWE(algorithm=JWE.Algorithm.A256GCMKW, encryption=JWE.Encryption.A128GCM)
+# Generate a 256-bit private key to encrypt and wrap a 512-bit key for Encryption + Authentication
+jwk2 = JWE(algorithm=JWE.Algorithm.A256GCMKW, encryption=JWE.Encryption.A256CBC_HS512)
 
 # Generate a 128-bit private key to wrap a 192-bit CEK for encrypting and decrypting data
 jwk3 = JWE(algorithm=JWE.Algorithm.A128KW, encryption=JWE.Encryption.A192GCM)
@@ -283,16 +287,17 @@ print(json.dumps(jwk2.to_jwk(),indent=4))
 
 jwk_json = """{
     "use": "enc",
-    "kid": "54db13e3-0091-44c8-a7bd-86e0fc538213",
+    "kid": "f47a54c3-85d8-46b8-a9cb-8a1b5f47eddb",
     "kty": "oct",
     "alg": "A256GCMKW",
-    "enc": "A128GCM",
+    "enc": "A256CBC-HS512",
     "key_ops": [
         "wrapKey",
         "unwrapKey"
     ],
-    "k": "Wps2SWH2b_cC0A2cyrVE5GK3Bmk9kxbJrPsOyQ8bDxY"
+    "k": "dkcM5Fnj7oYN4r4NGs7RMVxSX1jcT9gwvoRgxXJ4um8"
 }
+
 """
 
 # which can later be reloaded for encryption / decryption operations
@@ -308,7 +313,7 @@ from webcrypt.jwe import JWE
 # Examples of all RSA Algorithms, with different CEK sizes
 
 jwe1 = JWE(algorithm=JWE.Algorithm.RSA_OAEP_256, encryption=JWE.Encryption.A192GCM)
-jwe2 = JWE(algorithm=JWE.Algorithm.RSA_OAEP, encryption=JWE.Encryption.A128GCM)
+jwe2 = JWE(algorithm=JWE.Algorithm.RSA_OAEP, encryption=JWE.Encryption.A128CBC_HS256)
 jwe3 = JWE(algorithm=JWE.Algorithm.RSA1_5, encryption=JWE.Encryption.A256GCM)
 
 
@@ -320,13 +325,42 @@ data = b'Byte data to be encrypted and decrypted'
 # encrypt data, and wrap the CEK
 token = pub_jwe.encrypt(data)
 
-# raises an error, a public key cannot decrypt the CEK!
+# Raises an Error, a public key cannot decrypt the CEK!
 pub_jwe.decrypt(token)
 
 # only the corresponding private key can unwrap the CEK and decrypt the data
 data_decrypted = jwe1.decrypt(token)
 
 assert data_decrypted == data
+```
+
+
+#### JWE PBE (Passphrase based Encryption) Algorithms
+
+```python
+from webcrypt.jwe import JWE
+import json
+
+# Generate a 192-bit private key to wrap a 384-bit key for Authentication + Encryption
+jwk = JWE(algorithm=JWE.Algorithm.PBES2_HS384_A192KW,
+          encryption=JWE.Encryption.A256GCM,
+          key="I love python")
+
+data = b'Some secret data'
+
+token = jwk.encrypt(data)
+
+print(json.dumps(JWE.decode_header(token), indent=4))
+
+# the Token header will look something like this, including the alg, enc and
+# the PBE salt and iteration count (p2s and p2c)
+header="""{
+    "alg": "PBES2-HS384+A192KW",
+    "enc": "A256GCM",
+    "kid": "08842033-5f83-477b-9be3-c91ab6e7635c",
+    "p2s": "7jByuyCgOWc4aEfkoAJ0VQ",
+    "p2c": 1644
+}"""
 ```
 
 ## Version 0.4.0
