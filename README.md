@@ -13,6 +13,8 @@ This project borrows ideas from, and is inspired by other Python libraries inclu
 * ``pycryptodome``
 * ``python-jose``
 
+``pip install "git+https://github.com/plataux/webcrypt@v0.6.1"``
+
 ## Project Goals
 
 * Provide all the essential cryptographic tools:
@@ -388,5 +390,5 @@ header="""{
 * Fix bug associated with JOSE Module attempting to sign or decrypt with public keys
 * improve index_jwks JOSE method
 
-``pip install "git+https://github.com/plataux/webcrypt@v0.6.0"``
+
 
