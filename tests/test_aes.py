@@ -34,6 +34,9 @@ def test_aes_export_import(keysize):
         # B64 strings are case sensitive, so we can't mess with the char case
         assert k.key == wk.AES.restore_key_bytes(k.base64)
 
+        # B85
+        assert k.key == wk.AES.restore_key_bytes(k.base85)
+
         # Lower case English-AES is automatically handled
         assert k.key == wk.AES.restore_key_bytes(k.words.lower())
         assert k.key == wk.AES.restore_key_bytes(k.words)

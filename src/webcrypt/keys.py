@@ -28,9 +28,8 @@ session Keys.
 from __future__ import annotations
 
 from cryptography.hazmat.primitives import hashes
-# from hashlib import sha256
+import hashlib
 
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -54,6 +53,7 @@ import json
 from math import ceil
 
 from base64 import urlsafe_b64encode, urlsafe_b64decode, b16encode, b16decode
+from base64 import b85encode, b85decode
 
 from enum import Enum
 
@@ -97,6 +97,10 @@ class AES:
 
         ``-BI1RL42sp2eS2bJiBQPIw==``
 
+        Or from Base85:
+
+        ``AQMS)p_Q5BEy)8_yvTzO``
+
         Or from the english words representation (case insensitive):
 
         ``WAST GUST BAKE EVIL CORE ARTY IFFY BOIL LOOT DUG TIP GWYN``
@@ -119,6 +123,9 @@ class AES:
 
             if len(key.split(' ')) in (12, 18, 24):
                 return english_to_key(key.upper())
+
+            elif key_len in (20, 30, 40):
+                return b85decode(key)
 
             elif key_len in (24, 44):
                 return urlsafe_b64decode(key)
@@ -173,10 +180,18 @@ class AES:
         if salt is None:
             salt = os.urandom(16)
 
-        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(),
-                         length=bit_size // 8, iterations=iterations,
-                         salt=salt)
-        return kdf.derive(key_material=passphrase.encode())
+        # kdf = PBKDF2HMAC(algorithm=hashes.SHA256(),
+        #                  length=bit_size // 8, iterations=iterations,
+        #                  salt=salt)
+        # k = kdf.derive(key_material=passphrase.encode())
+
+        k = hashlib.pbkdf2_hmac('sha256',
+                                passphrase.encode(),
+                                salt,
+                                iterations,
+                                bit_size // 8)
+
+        return k
 
     __slots__ = ('_key',)
 
@@ -245,6 +260,10 @@ class AES:
         key: Any = self._key
         return urlsafe_b64encode(key).decode()
 
+    @ property
+    def base85(self) -> str:
+        return b85encode(self._key, False).decode()
+
     @property
     def words(self) -> str:
         """
@@ -261,6 +280,7 @@ bytes   : {str(self.key)}\n
 integers: {str(self.array)}\n
 base16  : {self.base16}\n
 base64  : {self.base64}\n
+base85  : {self.base85}\n
 english : {self.words}
 """
 
