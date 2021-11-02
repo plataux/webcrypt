@@ -391,4 +391,13 @@ header="""{
 * improve index_jwks JOSE method
 
 
+## Version 0.6.1
+
+* Support fo PBE and all CBC AES encyption Modes
+
+
+## Version 0.6.2
+
+* Add Base85 encoding and decoding of AES keys
+* replace pbkdf using cryptography to use hashlib instead
 
