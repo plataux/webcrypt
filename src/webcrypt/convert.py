@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import (decode_dss_signatur
 
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import json
 
@@ -192,3 +192,41 @@ def ec_sig_der_to_raw_b64(sig_der, byte_size=None) -> str:
 def ec_sig_der_from_raw_b64(sig_raw_b64: str) -> bytes:
     sig_raw = bytes_from_b64(sig_raw_b64)
     return ec_sig_der_from_raw(sig_raw)
+
+
+def symbols_from_bytes(key: bytes, vocab: str | List[str]) -> List[str]:
+    """
+    Based on a given ordered list (or string) of symbol vocab, encode a byte string to
+    a List of symbols
+
+    :param key:
+    :param vocab:
+    :return:
+    """
+    integer = int_from_bytes(key)
+    array = []
+    bx = len(vocab)
+    while integer:
+        integer, value = divmod(integer, bx)
+        array.append(vocab[value])
+    return list(reversed(array))
+
+
+def symbols_to_bytes(array: str | List[str], vocab: str | List[str]) -> bytes:
+    """
+
+    Based on a given ordered list (or string) of symbol vocab,
+    restore bytes from an array (or string)
+    of symbols
+
+    :param array:
+    :param vocab:
+    :return:
+    """
+    integer = 0
+    bx = len(vocab)
+    for symbol in array:
+        value = vocab.index(symbol)
+        integer *= bx
+        integer += value
+    return int_to_bytes(integer)
