@@ -22,12 +22,12 @@ from cryptography.hazmat.primitives.asymmetric.utils import (decode_dss_signatur
 
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Literal
 
 import json
 
 
-def int_to_bytes(num: int, order="big", byte_size=None) -> bytes:
+def int_to_bytes(num: int, order: Literal["little", "big"] = "big", byte_size=None) -> bytes:
     """
     Convert a positive int to a bytes string. if byte_size kwarg is None, a byte string with
     enough length to contain the integer will be calculated and used.
@@ -40,7 +40,7 @@ def int_to_bytes(num: int, order="big", byte_size=None) -> bytes:
     return num.to_bytes(byte_size or (num.bit_length() + 7) // 8 or 1, order, signed=False)
 
 
-def int_from_bytes(num_bytes: bytes, order="big") -> int:
+def int_from_bytes(num_bytes: bytes, order: Literal["little", "big"] = "big") -> int:
     """
     Convert a byte string to a positive int object
 
@@ -51,7 +51,7 @@ def int_from_bytes(num_bytes: bytes, order="big") -> int:
     return int.from_bytes(num_bytes, order)
 
 
-def int_to_hex(num: int, order="big", byte_size=None) -> str:
+def int_to_hex(num: int, order: Literal["little", "big"] = "big", byte_size=None) -> str:
     """
     positive python int object to hexadecimal unicode string with optional byte size param.
     Optional byte size. If byte size is larger than needed for the int it is zero padded.
@@ -65,7 +65,7 @@ def int_to_hex(num: int, order="big", byte_size=None) -> str:
     return b.hex()
 
 
-def int_from_hex(num_b16: str, order="big") -> int:
+def int_from_hex(num_b16: str, order: Literal["little", "big"] = "big") -> int:
     """
     Convert a hexadecimal string to the equivalent integer value as a python int object.
     Case insensitive
@@ -78,7 +78,8 @@ def int_from_hex(num_b16: str, order="big") -> int:
     return int_from_bytes(b, order)
 
 
-def int_to_b64(num: int, order="big", byte_size=None, remove_padding=True) -> str:
+def int_to_b64(num: int, order: Literal["little", "big"] = "big",
+               byte_size=None, remove_padding=True) -> str:
     """
     positive, python int object to base64 unicode string, with default option to remove
     LSB b64 padding.
@@ -94,7 +95,8 @@ def int_to_b64(num: int, order="big", byte_size=None, remove_padding=True) -> st
     return bytes_to_b64(int_to_bytes(num, order, byte_size), remove_padding=remove_padding)
 
 
-def int_from_b64(num_b64: str, order="big", ensure_padding=True) -> int:
+def int_from_b64(num_b64: str,
+                 order: Literal["little", "big"] = "big", ensure_padding=True) -> int:
     """
     convert a base64 unicode representation of an integer to a positive python int object.
     If b64 padding (the ``=`` char) is needed, it is automatically calculated and added before
@@ -171,7 +173,7 @@ def ec_sig_der_to_raw(sig_der: bytes, byte_size=None) -> bytes:
     Elliptic Curve Signature from DER format to RAW format
 
     :param sig_der: EC Signature in DER format
-    :param byte_size: byte size to fit each EC sig component. auto fitted by default
+    :param byte_size: byte size to fit each EC sig component. auto-fitted by default
     :return:  RAW representation of EC signature
     """
     r, s = decode_dss_signature(sig_der)

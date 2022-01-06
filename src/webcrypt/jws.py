@@ -28,7 +28,7 @@ from math import ceil
 from random import choice
 import os
 
-from cryptography.hazmat.primitives.hashes import SHA256, SHA384, SHA512
+from cryptography.hazmat.primitives.hashes import SHA256, SHA384, SHA512, SHA3_256
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import hmac
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -36,6 +36,9 @@ from cryptography.hazmat.primitives.asymmetric.ec import SECP256R1, SECP384R1, S
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization as ser
+
+import cryptography.hazmat.primitives.asymmetric.ed25519 as ed25519
+import cryptography.hazmat.primitives.asymmetric.ed448 as ed448
 
 import webcrypt.convert as conv
 import webcrypt.exceptions as tex
@@ -45,6 +48,8 @@ from cryptography.exceptions import InvalidSignature
 from uuid import uuid4
 
 jws_kty = Union[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey,
+                ed448.Ed448PublicKey, ed448.Ed448PrivateKey,
+                ed25519.Ed25519PublicKey, ed25519.Ed25519PrivateKey,
                 rsa.RSAPrivateKey, rsa.RSAPublicKey, bytes]
 
 
@@ -62,6 +67,8 @@ class JWS:
         ES256 = "ES256"
         ES384 = "ES384"
         ES512 = "ES512"
+        Ed25519 = "EdDSA"
+        Ed448 = "EdDSA"
 
     alg_to_curve: Dict[str, Any] = {
         'ES256': {'curve': SECP256R1()},
@@ -78,6 +85,7 @@ class JWS:
     _HMAC = ('HS256', 'HS384', 'HS512')
     _EC = ('ES256', 'ES384', 'ES512')
     _RSA = ('RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512')
+    _ED = ("Ed25519", "Ed448")
 
     _ec_types = (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)
     _rsa_types = (rsa.RSAPrivateKey, rsa.RSAPublicKey)
@@ -85,9 +93,15 @@ class JWS:
     @staticmethod
     def get_hash_alg(jws_alg: str | Algorithm) -> hashes.HashAlgorithm:
         if isinstance(jws_alg, JWS.Algorithm):
-            jws_alg = jws_alg.value
+            jws_alg = jws_alg.name
 
-        if (_alg := jws_alg[2:]) == '256':
+        # First handle Ed cases to get this out of the way
+        if jws_alg in ("Ed25519", "EdDSA"):
+            return SHA512()
+        elif jws_alg == "Ed448":
+            return SHA3_256()
+
+        elif (_alg := jws_alg[2:]) == '256':
             return SHA256()
         elif _alg == '384':
             return SHA384()
@@ -182,9 +196,53 @@ class JWS:
 
         del self._key
 
+    def _init_ed(self):
+        if self._key is None:
+            if self._alg == JWS.Algorithm.Ed25519:
+                self._key = ed25519.Ed25519PrivateKey.generate()
+            elif self._alg == JWS.Algorithm.Ed448:
+                self._key = ed448.Ed448PrivateKey.generate()
+            else:
+                raise RuntimeError(f"unexpected algorithm: {self._alg}")
+
+        # Internally uses a private class name with an _ prefix
+        ed_type = type(self._key).__name__[1:]
+
+        _ed_types = {
+            "Ed448PrivateKey": {'can_sign': True, 'crv': 'Ed448'},
+            "Ed448PublicKey": {'can_sign': False, 'crv': 'Ed448'},
+            "Ed25519PrivateKey": {'can_sign': True, 'crv': 'Ed25519'},
+            "Ed25519PublicKey": {'can_sign': False, 'crv': 'Ed25519'}
+        }
+
+        if ed_type not in tuple(_ed_types.keys()):
+            raise ValueError("Invalid ED Key")
+
+        if self._alg.name != _ed_types[ed_type]['crv']:
+            raise ValueError("Provided ED Key is incompatible with the specified JWS Alg-crv")
+
+        self._hash_alg = JWS.get_hash_alg(self._alg)
+
+        self._kty = 'OKP'
+        self._crv = _ed_types[ed_type]['crv']
+        self._can_sign = _ed_types[ed_type]['can_sign']
+
+        if self._can_sign:
+            self._ed_privkey: Union[ed448.Ed448PrivateKey,
+                                    ed25519.Ed25519PrivateKey, None] = self._key
+            self._ed_pubkey: Union[ed448.Ed448PublicKey,
+                                   ed25519.Ed25519PublicKey] = self._key.public_key()
+        else:
+            self._ed_privkey = None
+            self._ed_pubkey = self._key
+
+        del self._key
+
     __slots__ = ('_key', '_header', '_hmac_key', '_hmac',
                  '_alg', '_kid', '_kty', '_hash_alg',
-                 '_ec_pubkey', '_ec_privkey', '_ec_size', '_crv', '_can_sign',
+                 '_ec_pubkey', '_ec_privkey', '_ec_size',
+                 '_ed_pubkey', '_ed_privkey',
+                 '_crv', '_can_sign',
                  '_rsa_pubkey', '_rsa_privkey', '_rsa_pad')
 
     def __init__(self, algorithm: Union[JWS.Algorithm, None] = None,
@@ -203,13 +261,15 @@ class JWS:
             self._init_rsa()
         elif self._alg.name in JWS._EC:
             self._init_ec()
+        elif self._alg.name in JWS._ED:
+            self._init_ed()
         else:
             raise ValueError("Unrecognized JWS Algo")
 
         self._kid = kid or str(uuid4())
 
         self._header = {
-            'alg': self._alg.name,
+            'alg': self._alg.value,  # we use alg.value here solely for "EdDSA" handling
             'kty': self._kty,
             'kid': self._kid,
         }
@@ -223,7 +283,7 @@ class JWS:
             "use": 'sig',
             'kid': self._kid,
             'kty': self._kty,
-            'alg': self._alg.name,
+            'alg': self._alg.value,
         }
 
         if self._kty == 'RSA':
@@ -247,14 +307,23 @@ class JWS:
                     ec_pub_num.y, byte_size=self._ec_size)),
             }
 
+        if self._kty == 'OKP':
+            jwk_dict = {
+                **jwk_dict,
+                "key_ops": ["verify"],
+                'crv': self._crv,
+                'x': conv.bytes_to_b64(
+                    self._ed_pubkey.public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw)),
+            }
+
         return jwk_dict
 
-    def to_jwk(self) -> Dict[str, str]:
+    def to_jwk(self) -> Dict[str, Any]:
         jwk_dict: Dict[str, Any] = {
             "use": 'sig',
             'kid': self._kid,
             'kty': self._kty,
-            'alg': self._alg.name,
+            'alg': self._alg.value,
         }
 
         if self._kty == 'oct':
@@ -308,6 +377,24 @@ class JWS:
 
                 kops.insert(0, "sign")
 
+        elif self._kty == 'OKP':
+            kops = ["verify"]
+            ed_pub_bytes = self._ed_pubkey.public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw)
+            jwk_dict = {
+                **jwk_dict,
+                "key_ops": kops,
+                'crv': self._crv,
+                'x': conv.bytes_to_b64(ed_pub_bytes),
+            }
+
+            if self._ed_privkey is not None:
+                pv = self._ed_privkey.private_bytes(ser.Encoding.Raw,
+                                                    ser.PrivateFormat.Raw, ser.NoEncryption())
+
+                jwk_dict['d'] = conv.bytes_to_b64(pv)
+
+                kops.insert(0, "sign")
+
         return jwk_dict
 
     @classmethod
@@ -320,17 +407,20 @@ class JWS:
         if not all(item in jwk for item in ('kty', 'alg')):
             raise ValueError("Invalid JWK format")
 
-        algo_map = {_ja.name: _ja for _ja in list(JWS.Algorithm)}
+        # this doesn't quite work for Ed Algos
+        algo_map = {_ja.value: _ja for _ja in list(JWS.Algorithm)}
 
         alg_name = jwk['alg']
 
         if alg_name not in algo_map:
             raise ValueError(f"Invalid JWK alg: {alg_name}")
 
+        # this doesn't quite work for Ed Algos, so it will be overwritten below if necessary
         alg = algo_map[alg_name]
+
         kty = jwk['kty']
 
-        if kty not in ('RSA', 'EC', 'oct'):
+        if kty not in ('RSA', 'EC', 'oct', 'OKP'):
             raise ValueError(f"Invalid JWK kty {jwk['alg']}")
 
         if 'kid' in jwk:
@@ -395,6 +485,38 @@ class JWS:
                 return cls(alg, pub_nums.public_key(), kid)
             else:
                 raise ValueError("Invalid EC Key")
+
+        elif kty == 'OKP':
+            if alg_name != "EdDSA":
+                raise ValueError("JWS Algorithm not compatible with this key")
+
+            if 'crv' not in jwk:
+                raise ValueError("the crv parameter is required for OKP JWK types")
+
+            else:
+                key_curve = jwk['crv']
+
+            if key_curve not in JWS._ED:
+                raise ValueError(f"only curves {JWS._ED} are valid, but got {key_curve}")
+
+            # overwrites the alg enum based on the value of the crv parameter
+            alg = JWS.Algorithm.Ed25519 if key_curve == "Ed25519" else JWS.Algorithm.Ed448
+
+            if key_curve == "Ed25519":
+                PrivKey = ed25519.Ed25519PrivateKey
+                PubKey = ed25519.Ed25519PublicKey
+            else:
+                PrivKey = ed448.Ed448PrivateKey
+                PubKey = ed448.Ed448PublicKey
+
+            if all(comp in jwk for comp in ('x', 'd')):
+                ed_key: Any = PrivKey.from_private_bytes(conv.bytes_from_b64(jwk['d']))
+                return cls(alg, ed_key, kid)
+            elif all(comp in jwk for comp in ('x',)):
+                ed_key = PubKey.from_public_bytes(conv.bytes_from_b64(jwk['x']))
+                return cls(alg, ed_key, kid)
+            else:
+                raise ValueError("Invalid ED Key")
 
         elif kty == 'oct':
             if 'k' in jwk:
@@ -469,6 +591,8 @@ class JWS:
             return self._ec_sign(head_payload_b64)
         elif self._alg.name in JWS._RSA:
             return self._rsa_sign(head_payload_b64)
+        elif self._alg.name in JWS._ED:
+            return self._ed_sign(head_payload_b64)
         else:
             raise NotImplementedError("Should be unreachable")
 
@@ -485,9 +609,9 @@ class JWS:
         except Exception as ex:
             raise tex.InvalidToken(f"Invalid Token Header: {ex}")
 
-        if alg != self._alg.name:
+        if alg != self._alg.value:
             raise tex.AlgoMismatch(
-                f"Algorithm Mismatch | Invalid : {alg} != {self._alg.name}")
+                f"Algorithm Mismatch | Invalid : {alg} != {self._alg.value}")
 
         try:
             sig: bytes = conv.bytes_from_b64(sp[2])
@@ -498,6 +622,8 @@ class JWS:
             return self._hmac_verify(sp[0], sp[1], sig)
         if alg in JWS._EC:
             return self._ec_verify(sp[0], sp[1], sig)
+        if alg == "EdDSA":
+            return self._ed_verify(sp[0], sp[1], sig)
         if alg in JWS._RSA:
             return self._rsa_verify(sp[0], sp[1], sig)
         else:
@@ -587,7 +713,7 @@ class JWS:
 
     @property
     def alg_name(self) -> str:
-        return self._alg.name
+        return self._alg.value
 
     @property
     def kid(self) -> str:
@@ -631,6 +757,21 @@ class JWS:
             self._ec_pubkey.verify(sig_der,
                                    f'{header_enc}.{payload_enc}'.encode(),
                                    ec.ECDSA(self._hash_alg))
+        except InvalidSignature as ex:
+            raise tex.InvalidSignature(ex)
+        return conv.bytes_from_b64(payload_enc)
+
+    def _ed_sign(self, head_payload: str) -> str:
+        if self._ed_privkey is not None:
+            sig = self._ed_privkey.sign(head_payload.encode())
+            return f'{head_payload}.{conv.bytes_to_b64(sig)}'
+        else:
+            raise RuntimeError("This ED JWS is not capable of signing - no privkey")
+
+    def _ed_verify(self, header_enc: str, payload_enc: str, sig: bytes) -> bytes:
+        try:
+            self._ed_pubkey.verify(sig,
+                                   f'{header_enc}.{payload_enc}'.encode())
         except InvalidSignature as ex:
             raise tex.InvalidSignature(ex)
         return conv.bytes_from_b64(payload_enc)
