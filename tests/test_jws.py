@@ -22,13 +22,35 @@ from typing import Dict
 def test_all_algo_ops(algo: JWS.Algorithm):
     sk1 = JWS(algorithm=algo)
 
-    # to and from jwk
+    # privkey to and from jwk
     sk2 = JWS.from_jwk(sk1.to_jwk())
+    assert sk1 == sk2
     assert json.dumps(sk1.to_jwk()) == json.dumps(sk2.to_jwk())
 
-    # to and from pem
+    # privkey to and from pem
     sk2 = JWS.from_pem(sk1.to_pem(), algorithm=algo)
-    assert sk1.to_pem() == sk2.to_pem()
+    assert sk1 == sk2
+
+    # privkey to and from key object
+    sk2 = JWS(algo, key_obj=sk1.key)
+    assert sk2 == sk1
+
+    # public jwk as the main key
+    if algo.name not in ('HS256', 'HS384', 'HS512'):
+        pub1 = JWS.from_jwk(sk1.public_jwk())
+
+        pub2 = JWS.from_jwk(pub1.to_jwk())
+        assert pub1 == pub2
+        assert json.dumps(pub1.to_jwk()) == json.dumps(pub2.to_jwk())
+        assert json.dumps(pub1.public_jwk()) == json.dumps(pub2.public_jwk())
+
+        pub2 = JWS.from_jwk(pub1.public_jwk())
+        assert pub1 == pub2
+        assert json.dumps(pub1.to_jwk()) == json.dumps(pub2.to_jwk())
+        assert json.dumps(pub1.public_jwk()) == json.dumps(pub2.public_jwk())
+
+        pub2 = JWS.from_pem(pub1.to_pem(), pub1.jws_alg)
+        assert pub1 == pub2
 
     # to and from key objects
     sk2 = JWS(algo, sk1.privkey)

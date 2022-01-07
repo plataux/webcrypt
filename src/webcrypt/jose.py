@@ -172,7 +172,7 @@ class JOSE:
         for jwk in self._sig_ks:
             if jwk.can_sign:
                 self._sig_idx_kid_priv[jwk.kid] = jwk
-                self._sig_idx_alg_priv[jwk.alg_name].append(jwk)
+                self._sig_idx_alg_priv[jwk.jws_alg.name].append(jwk)
 
         if jwe is None:
             self._enc_ks = [JWE(JWE.Algorithm.A256KW)]
