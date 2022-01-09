@@ -48,6 +48,8 @@ from cryptography.hazmat.primitives.keywrap import aes_key_wrap, aes_key_unwrap
 
 from cryptography.hazmat.primitives.ciphers.algorithms import AES
 
+from cryptography.hazmat.primitives.constant_time import bytes_eq
+
 import webcrypt.convert as conv
 import webcrypt.exceptions as tex
 
@@ -345,7 +347,7 @@ class JWE:
 
         sig = hmac_signer.finalize()
 
-        if sig[:key_len] != tag:
+        if not bytes_eq(sig[:key_len], tag):
             raise tex.InvalidSignature("Tag invalid - Token Fabricated or Tampered With")
 
         try:

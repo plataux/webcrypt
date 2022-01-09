@@ -28,6 +28,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any, TypeVar, Type, Union, DefaultDict
 from pydantic import BaseModel, Field
 
+from cryptography.hazmat.primitives.constant_time import bytes_eq
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 # from cryptography.hazmat.primitives import hashes
 # from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -628,7 +630,7 @@ class JOSE:
                                             "was not provided")
                 else:
                     _at_hash = JOSE.at_hash(access_token, jwk)
-                    if token.at_hash != _at_hash:
+                    if not bytes_eq(token.at_hash.encode(), _at_hash.encode()):
                         raise tex.InvalidClaims("Invalid at_hash against given access_token")
             if token.at_hash is None and access_token is not None:
                 raise tex.InvalidClaims("at_hash was missing from the token")
