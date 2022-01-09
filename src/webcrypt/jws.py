@@ -676,7 +676,7 @@ class JWS:
             return cls(choice(hx), rsa.generate_private_key(65537, choice(ks)))
 
         def _ec_key():
-            _c = [J.ES256, J.ES384, J.ES512]
+            _c = [J.ES256, J.ES384, J.ES512, J.ES256K]
             return cls(choice(_c))
 
         def _ed_key():

@@ -43,6 +43,8 @@ from webcrypt.rfc1751 import key_to_english, english_to_key
 from webcrypt.convert import int_to_b64
 import webcrypt.convert as conv
 
+from webcrypt.jwe import JWE
+
 from typing import Union, Optional, Dict, Any, List
 
 import os
@@ -101,7 +103,7 @@ class AES:
 
         ``AQMS)p_Q5BEy)8_yvTzO``
 
-        Or from the english words representation (case insensitive):
+        Or from the english words representation (case-insensitive):
 
         ``WAST GUST BAKE EVIL CORE ARTY IFFY BOIL LOOT DUG TIP GWYN``
 
@@ -260,7 +262,7 @@ class AES:
         key: Any = self._key
         return urlsafe_b64encode(key).decode()
 
-    @ property
+    @property
     def base85(self) -> str:
         return b85encode(self._key, False).decode()
 
@@ -1013,3 +1015,69 @@ class EDKey:
     @classmethod
     def pubkey_from_hex(cls, pubkey_hex: str) -> "EDKey":
         return cls(ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex)))
+
+
+def encrypt_cbc(comp_key: bytes, plaintext: bytes, auth_data: bytes = b''):
+    """
+
+    :param comp_key: Composite Key: First half for HMAC, and second half for Content Encryption
+    :param plaintext:
+    :param auth_data:
+    :return:
+    """
+    x, y, z = JWE.cbc_encrypt(comp_key, auth_data, plaintext)
+    return x + y + z
+
+
+def decrypt_cbc(comp_key: bytes, ciphertext: bytes, auth_data: bytes = b'') -> bytes:
+    """
+
+    :param comp_key: Composite Key: First half for HMAC, and second half for Content Encryption
+    :param ciphertext:
+    :param auth_data:
+    :return:
+    """
+    key_len = len(comp_key) // 2
+    iv = ciphertext[:16]
+    ct = ciphertext[16:-key_len]
+    tag = ciphertext[-key_len:]
+    return JWE.cbc_decrypt(comp_key, auth_data, iv, ct, tag)
+
+
+def encrypt_gcm(key: bytes, plaintext: bytes, auth_data: bytes = b'') -> bytes:
+    """
+    AES encryption with GCM Mode, which is fast, open and secure,
+    and a good choice for the web apps - GCM is now part of the standard TLS suite.
+
+    uses a 96-bit random iv, which is inserted at the start of the ciphertext.
+    Optionally accepts authenticated data byte string, which defaults to ``b''``
+
+    :param key: 16, 24 or 32 bytes string
+    :param plaintext: binary data of less than 4.0 Gb size
+    :param auth_data: None-Encrypted Authenticated data, defaults to empty byte string
+    :return: Encrypted Binary Data with 12-byte nonce iv inserted at the head
+
+    """
+
+    aesgcm = AESGCM(key)
+    iv = os.urandom(12)  # 96-bits for best performance
+    ciphertext = aesgcm.encrypt(iv, plaintext, auth_data)
+    encrypted_data: bytes = iv + ciphertext
+
+    return encrypted_data
+
+
+def decrypt_gcm(key: bytes, ciphertext: bytes, auth_data: bytes = b'') -> bytes:
+    """
+    Decrypts the given ciphertext, expecting 96-bit iv at the start, followed by the
+    ciphertext and 16-byte tag. Accepts Authenticated Data string, which defaults to b''
+
+    :param key:
+    :param ciphertext: Ciphertext with 96-bit iv at the start, 16-byte tag at the end
+    :param auth_data: Optional Authenticated data
+    :return: decrypted data
+    """
+    aesgcm = AESGCM(key)
+    nonce, ciphertext = ciphertext[:12], ciphertext[12:]
+    data: bytes = aesgcm.decrypt(nonce, ciphertext, auth_data)
+    return data
