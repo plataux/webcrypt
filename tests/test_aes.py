@@ -66,12 +66,12 @@ def test_encrypt_decrypt(auth_data):
 
 
 def test_derive_key():
-    k1 = wk.AES.derive_key('python')
-    k2 = wk.AES.derive_key('python')
+    k1 = wk.derive_key('python')
+    k2 = wk.derive_key('python')
 
     assert k1 != k2
 
-    k1 = wk.AES.derive_key('python', salt=b'abcdefg')
-    k2 = wk.AES.derive_key('python', salt=b'abcdefg')
+    k1 = wk.derive_key('python', salt=b'abcdefg')
+    k2 = wk.derive_key('python', salt=b'abcdefg')
 
     assert k1 == k2

@@ -39,6 +39,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import padding
 import cryptography.hazmat.primitives.asymmetric.ed25519 as ed
 
+from cryptography.hazmat.primitives.keywrap import aes_key_wrap as wrap
+from cryptography.hazmat.primitives.keywrap import aes_key_unwrap as unwrap
+
 from webcrypt.rfc1751 import key_to_english, english_to_key
 from webcrypt.convert import int_to_b64
 import webcrypt.convert as conv
@@ -71,7 +74,7 @@ class AES:
     Generates, derives and wraps a valid AES key object, of bit size 128, 192, or 256.
 
     Contains methods to represent the key bytes in base16, base64, int array and english words.
-    encrypt and decrypt methods that uses GCM mode, and a random 96-bit Initialization Vector
+    encrypt and decrypt methods that use GCM mode, and a random 96-bit Initialization Vector
     (iv) inserted at the head of the ciphertext, with an optional *authenticated data* as input.
 
     Includes a key derivation static method ``derive_key`` with a few options to derive
@@ -155,46 +158,6 @@ class AES:
         else:
             raise ValueError("key to be parsed can only be of type str, or List[int]")
 
-    @staticmethod
-    def derive_key(passphrase: str, bit_size: int = 128,
-                   iterations: int = 1024 * 16,
-                   salt: Optional[bytes] = None) -> bytes:
-        """
-        Derive an AES key from a given passphrase and an optional salt and iteration count.
-        If a salt is not provided, a random 16-bit salt is generated.
-        If a fixed salt is provided with a fixed number of iterations, the same
-        AES key can be derived from the same passphrase each time.
-
-        The number of iterations is an input to the key derivation process (so it affects the
-        derived key), and controls the key derivation speed. Higher values means a slower
-        process, which makes breaking of a given passphrase harder
-
-        :param passphrase: a string as key material for key derivation
-        :param bit_size: AES key bit size
-        :param iterations: to control the slowness of the key derivation. The higher the slower
-        :param salt: a byte sequence of any length.
-        :return: a Derived AES key with the desired bit length
-        """
-
-        if bit_size not in (128, 192, 256):
-            raise ValueError("Invalid AES Keysize")
-
-        if salt is None:
-            salt = os.urandom(16)
-
-        # kdf = PBKDF2HMAC(algorithm=hashes.SHA256(),
-        #                  length=bit_size // 8, iterations=iterations,
-        #                  salt=salt)
-        # k = kdf.derive(key_material=passphrase.encode())
-
-        k = hashlib.pbkdf2_hmac('sha256',
-                                passphrase.encode(),
-                                salt,
-                                iterations,
-                                bit_size // 8)
-
-        return k
-
     __slots__ = ('_key',)
 
     def __init__(self, key: int | bytes | List[int] | str = 128):
@@ -216,11 +179,9 @@ class AES:
             else:
                 raise ValueError("Invalid AES keysize")
 
-        elif isinstance(key, list):
+        elif isinstance(key, (list, str)):
             self._key = AES.restore_key_bytes(key)
 
-        elif isinstance(key, str):
-            self._key = AES.restore_key_bytes(key)
         else:
             raise ValueError("Invalid AES input")
 
@@ -335,6 +296,12 @@ english : {self.words}
         nonce, ciphertext = data_encrypted[:12], data_encrypted[12:]
         data: bytes = aesgcm.decrypt(nonce, ciphertext, auth_data)
         return data
+
+    def wrap(self, cek: bytes) -> bytes:
+        return wrap(self.key, cek)
+
+    def unwrap(self, wrapped_cek) -> bytes:
+        return unwrap(self.key, wrapped_cek)
 
 
 class RSA:
@@ -822,7 +789,7 @@ class ECKey:
 
     def privkey_pem(self) -> str:
         if self.privkey is None:
-            raise ValueError("not a private RSA key")
+            raise ValueError("not a private EC key")
 
         return self.privkey.private_bytes(
             ser.Encoding.PEM,
@@ -902,17 +869,18 @@ class ECKey:
     @staticmethod
     def ecdh_derive_key(privkey: ec.EllipticCurvePrivateKey,
                         pubkey: ec.EllipticCurvePublicKey,
-                        keysize=128,
+                        cek_bits=128,
                         salt: Optional[bytes] = None,
-                        info: Optional[bytes] = None):
+                        info: Optional[bytes] = None,
+                        hash_alg: hashes.HashAlgorithm = hashes.SHA256()):
         shared_key = privkey.exchange(ec.ECDH(), pubkey)
 
-        if not isinstance(keysize, int) or keysize not in (128, 192, 256):
+        if not isinstance(cek_bits, int) or cek_bits not in (128, 192, 256):
             raise ValueError('AES Key length can be one of 128, 192, 256')
 
         derived_key = HKDF(
-            algorithm=hashes.SHA256(),
-            length=int(keysize / 8),
+            algorithm=hash_alg,
+            length=int(cek_bits / 8),
             salt=salt,
             info=info,
         ).derive(shared_key)
@@ -982,7 +950,7 @@ class EDKey:
 
     def privkey_pem(self) -> str:
         if self.privkey is None:
-            raise ValueError("not a private RSA key")
+            raise ValueError("not a private Ed key")
 
         return self.privkey.private_bytes(
             ser.Encoding.PEM,
@@ -1015,6 +983,45 @@ class EDKey:
     @classmethod
     def pubkey_from_hex(cls, pubkey_hex: str) -> "EDKey":
         return cls(ed.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex)))
+
+
+def derive_key(passphrase: str, bit_size: int = 128,
+               iterations: int = 1024 * 256,
+               salt: Optional[bytes] = None) -> bytes:
+    """
+    Derive a key from a given passphrase and an optional salt and iteration count.
+    If a salt is not provided, a random 16-bit salt is generated.
+    If a fixed salt is provided with a fixed number of iterations, the same
+    key can be derived from the same passphrase each time.
+
+    The number of iterations is an input to the key derivation process (so it affects the
+    derived key), and controls the key derivation speed. Higher values means a slower
+    process, which makes breaking of a given passphrase harder
+
+    :param passphrase: a string as key material for key derivation
+    :param bit_size: key bit size (128, 192, 256, 384, 512)
+    :param iterations: to control the slowness of the key derivation. The higher, the slower
+    :param salt: a byte sequence of any length.
+    :return: a Derived AES key with the desired bit length
+    """
+
+    if bit_size not in (128, 192, 256, 384, 512):
+        raise ValueError("Invalid AES Keysize")
+
+    if salt is None:
+        salt = os.urandom(16)
+
+    # kdf = PBKDF2HMAC(algorithm=hashes.SHA256(),
+    #                  length=bit_size // 8, iterations=iterations,
+    #                  salt=salt)
+    # k = kdf.derive(key_material=passphrase.encode())
+
+    k = hashlib.pbkdf2_hmac('sha256',
+                            passphrase.encode(),
+                            salt,
+                            iterations,
+                            bit_size // 8)
+    return k
 
 
 def encrypt_cbc(comp_key: bytes, plaintext: bytes, auth_data: bytes = b''):
