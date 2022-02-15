@@ -2,7 +2,7 @@
 
 Webcrypt is a collection of Python3 tools and constructs that aim to simplify the implementation
 of all sorts of high-level cryptographic functionality commonly needed in the 
-development of modern web applications.
+development of modern, distributed, and security-focused web applications.
 
 At its core, Webcrypt relies entirely and **only** on the Python Library ``cryptography`` for all 
 cryptographic operations, and acts as a thin wrapper around this library's primitives to provide 
