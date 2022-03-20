@@ -986,7 +986,7 @@ class EDKey:
 
 
 def derive_key(passphrase: str, bit_size: int = 128,
-               iterations: int = 1024 * 256,
+               iterations: int = 1024 * 64,
                salt: Optional[bytes] = None) -> bytes:
     """
     Derive a key from a given passphrase and an optional salt and iteration count.

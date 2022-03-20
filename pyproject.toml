@@ -9,6 +9,18 @@ testpaths = [
     "tests",
 ]
 
+[tool.poetry]
+name = "hive"
+version = "0.6.3"
+description = "High level Constructs for Web App cryptography and JOSE spec implementation"
+authors = ["mk <mk@plataux.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+
+pydantic = "^1.9"
+cryptography = "^36"
+
 [tool.mypy]
 mypy_path = "src"
 check_untyped_defs = true

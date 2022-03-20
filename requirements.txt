@@ -1,4 +1,0 @@
-
-setuptools>=50.0.0
-pydantic~=1.8.2
-cryptography>=36.0.0
