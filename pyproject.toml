@@ -10,7 +10,7 @@ testpaths = [
 ]
 
 [tool.poetry]
-name = "hive"
+name = "webcrypt"
 version = "0.6.3"
 description = "High level Constructs for Web App cryptography and JOSE spec implementation"
 authors = ["mk <mk@plataux.com>"]
