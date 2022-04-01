@@ -62,7 +62,7 @@ python-versions = ">=3.6"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "b1c8777e2d4bd6888cfa47ca5ddbcde3ae9acb9e697618c7669fdd9a56847eef"
+content-hash = "fa2deae50f9b55b413a8bbcb81ba8f14316f011b7cbe0a9516328f48190c34e7"
 
 [metadata.files]
 cffi = [

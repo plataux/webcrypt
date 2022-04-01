@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import (decode_dss_signatur
 
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 
-from typing import Dict, Any, List, Literal
+from typing import Dict, Any, List, Literal, Tuple
 
 import json
 
@@ -232,3 +232,31 @@ def symbols_to_bytes(array: str | List[str], vocab: str | List[str]) -> bytes:
         integer *= bx
         integer += value
     return int_to_bytes(integer)
+
+
+def basic_auth_creds_encode(username: str, password: str) -> str:
+    if not all((username, password)):
+        raise ValueError("Basic Auth Creds cannot be empty string or None")
+
+    if not (len(username) and len(password)):
+        raise ValueError("Basic Auth username or password cannot be an empty string")
+
+    if ":" in username:
+        raise ValueError("username cannot contain the colon character")
+
+    return urlsafe_b64encode(f"{username}:{password}".encode()).decode()
+
+
+def basic_auth_creds_decode(creds_encoded: str) -> Tuple[str, str]:
+    if not creds_encoded:
+        raise ValueError("Basic Auth Creds cannot be None")
+
+    pd = urlsafe_b64decode(creds_encoded).decode().split(":", 1)
+
+    if len(pd) != 2:
+        raise ValueError("Invalid Encoded Basic Auth String")
+
+    if not (len(pd[0]) and len(pd[1])):
+        raise ValueError("Basic Auth username or password cannot be an empty string")
+
+    return pd[0], pd[1]

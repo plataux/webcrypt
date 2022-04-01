@@ -9,17 +9,29 @@ testpaths = [
     "tests",
 ]
 
+
+
 [tool.poetry]
 name = "webcrypt"
-version = "0.6.3"
+version = "0.6.4"
 description = "High level Constructs for Web App cryptography and JOSE spec implementation"
 authors = ["mk <mk@plataux.com>"]
+packages = [
+    { include = "webcrypt", from = "src" },
+]
+
+#[[tool.poetry.source]]
+#name = "plataux"
+#url = "https://pypi.tpad.plataux.com"
+#secondary = true
 
 [tool.poetry.dependencies]
 python = "^3.8"
 
 pydantic = "^1.9"
 cryptography = "^36"
+
+[tool.poetry.dev-dependencies]
 
 [tool.mypy]
 mypy_path = "src"
