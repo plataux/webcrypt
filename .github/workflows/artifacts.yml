@@ -2,8 +2,6 @@
 name: Publish Artifacts
 on:
   workflow_dispatch:
-  issue_comment:
-    types: [created]
 jobs:
   publish-artifacts:
     runs-on: ubuntu-latest
