@@ -1,0 +1,28 @@
+
+name: Publish Artifacts
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+jobs:
+  publish-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v1
+        with:
+          python-version: 3.8
+      - uses: Gr1N/setup-poetry@v7
+        with:
+          poetry-version: 1.1.13
+      - run: poetry --version
+
+      - name: Build Python package
+        run: make -f builder.Makefile build
+
+      - name: Upload poetry build
+        uses: actions/upload-artifact@v3
+        with:
+          name: package
+          path: ${{ github.workspace }}/dist/
+
