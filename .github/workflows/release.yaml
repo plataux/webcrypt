@@ -41,6 +41,7 @@ jobs:
         with:
           artifacts: "dist/*"
           draft: true
+          commit: "main"
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.event.inputs.tag }}
     
