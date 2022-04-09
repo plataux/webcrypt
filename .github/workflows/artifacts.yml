@@ -16,7 +16,7 @@ jobs:
       - run: poetry --version
 
       - name: Build Python package
-        run: make -f builder.Makefile build
+        run: make build
 
       - name: Upload poetry build
         uses: actions/upload-artifact@v3
