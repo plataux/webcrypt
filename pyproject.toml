@@ -1,7 +1,7 @@
 
 [tool.poetry]
 name = "webcrypt"
-version = "0.8.0"
+version = "0.9.0"
 description = "High level Constructs for Web App cryptography and JOSE spec implementation"
 license = "Apache-2.0"
 authors = ["mk <mk@plataux.com>"]
@@ -22,11 +22,15 @@ packages = [
     { include = "webcrypt", from = "src" },
 ]
 
+[tool.poetry.scripts]
+webcrypt = "webcrypt.cli:main"
+
 
 [tool.poetry.dependencies]
 python = "^3.8"
 pydantic = "^1.9"
 cryptography = "^37.0"
+typer = {extras = ["all"], version = "^0.6.1"}
 
 [tool.poetry.dev-dependencies]
 flake8 = "^4.0"
