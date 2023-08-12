@@ -208,8 +208,7 @@ class JWS:
             else:
                 raise RuntimeError(f"unexpected algorithm: {self._alg}")
 
-        # Internally uses a private class name with an _ prefix
-        ed_type = type(self._key).__name__[1:]
+        ed_type = type(self._key).__name__
 
         _ed_types: Any = {
             "Ed448PrivateKey": {'can_sign': True, 'crv': 'Ed448'},
