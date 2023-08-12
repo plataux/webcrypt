@@ -1,7 +1,7 @@
 
 [tool.poetry]
 name = "webcrypt"
-version = "1.0.0"
+version = "1.1.0"
 description = "High level Constructs for Web App cryptography and JOSE spec implementation"
 license = "Apache-2.0"
 authors = ["mk <mk@plataux.com>"]
@@ -29,16 +29,15 @@ webcrypt = "webcrypt.cli:main"
 [tool.poetry.dependencies]
 python = ">=3.8,<4"
 pydantic = "^1.10"
-cryptography = "^40.0"
-typer = {extras = ["all"], version = "^0.6.1"}
+cryptography = "^41.0"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^4.0"
-tox = "^3.24"
-pytest = "^7.3"
-pytest-cov = "^4.0"
-mypy = "^1.2"
-sphinx = "^4.4"
+tox = "^3.28"
+pytest = "^7.4"
+pytest-cov = "^4.1"
+mypy = "^1.5"
+sphinx = "^4.5"
 sphinx-rtd-theme = "^1.2"
 recommonmark = "^0.7"
 
