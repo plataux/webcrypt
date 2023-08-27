@@ -220,10 +220,15 @@ class JOSE:
         jws, jwe = [], []
 
         for item in jwks_dict['keys']:
-            if (_use := item['use']) == 'sig':
-                jws.append(JWS.from_jwk(item))
-            elif _use == 'enc':
-                jwe.append(JWE.from_jwk(item))
+            try:
+                if (_use := item['use']) == 'sig':
+                    jws.append(JWS.from_jwk(item))
+                elif _use == 'enc':
+                    jwe.append(JWE.from_jwk(item))
+            except Exception as ex:
+                import logging
+                logging.warning(f"Invalid JWK in JWKS: {ex}, will proceed without it")
+                continue
 
         return cls(jws, jwe)
 
