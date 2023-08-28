@@ -10,24 +10,6 @@ import json
 import webcrypt.convert as conv
 import os
 
-_alg_size = {
-    'A128KW': 16,
-    'A192KW': 24,
-    'A256KW': 32,
-    'A128GCMKW': 16,
-    'A192GCMKW': 24,
-    'A256GCMKW': 32,
-    'PBES2-HS256+A128KW': 16,
-    'PBES2-HS384+A192KW': 24,
-    'PBES2-HS512+A256KW': 32,
-    'A128GCM': 16,
-    'A192GCM': 24,
-    'A256GCM': 32,
-    'A128CBC-HS256': 32,
-    'A192CBC-HS384': 48,
-    'A256CBC-HS512': 64
-}
-
 
 # @pytest.fixture(scope="session")
 # def rsa_keys() -> Dict[int, wk.RSA]:
@@ -54,7 +36,7 @@ def test_jwe_conversions(algo: JWE.Algorithm):
 
         #
         # to and from key objects
-        ek2 = JWE(algo, encryption=None, key=ek1.privkey)
+        ek2 = JWE(algo, key=ek1.privkey)
         assert ek1.to_pem() == ek2.to_pem()
     #
     # data = b'Some Random data to be encrypted and decrypted
@@ -63,58 +45,44 @@ def test_jwe_conversions(algo: JWE.Algorithm):
 def test_jwe_defaults():
     # test JWE defaults
     ek = JWE()
-    assert len(ek.key) == 16 and ek.alg_name == 'A128KW' and ek.enc_name == 'A128GCM'
     assert ek.kty == 'oct'
 
     # test default Encryption algorithm, A128GCM by default
     ek = JWE(JWE.Algorithm.DIR)
-    assert len(ek.key) == 16 and ek.alg_name == 'dir' and ek.enc_name == 'A128GCM'
+    assert ek.alg_name == 'dir'
     assert ek.kty == 'oct'
 
 
 @pytest.mark.parametrize(
     "enc",
-    [JWE.Encryption.A128GCM, JWE.Encryption.A192GCM, JWE.Encryption.A256GCM]
+    list(JWE.Encryption)
 )
 def test_dir_ops(enc):
     # test randomly generated keys with given encryption algos
-    ek = JWE(JWE.Algorithm.DIR, encryption=enc)
-    assert len(ek.key) == _alg_size[enc.name]
-    assert ek.alg_name == 'dir' and ek.enc_name == enc.name
 
-    # test existing keys without specifying encryption algos
-    k = os.urandom(_alg_size[enc.name])
-    with pytest.raises(ValueError):
-        JWE(JWE.Algorithm.DIR, key=k)
+    ek = JWE(JWE.Algorithm.DIR, key=os.urandom(JWE._alg_size[enc.value]))
+    assert ek.alg_name == 'dir'
 
     # test invalid AES keys
-    k = os.urandom(_alg_size[enc.name]) + b'x'
+    k = os.urandom(JWE._alg_size[enc.value]) + b'x'
     with pytest.raises(ValueError):
         JWE(JWE.Algorithm.DIR, key=k)
 
-    k = os.urandom(_alg_size[enc.name])[:-1]
+    k = os.urandom(JWE._alg_size[enc.value])[:-1]
     with pytest.raises(ValueError):
         JWE(JWE.Algorithm.DIR, key=k)
-    #
-    # test valid keys that contradict specified encryption algorithm
-    valid_sizes = [16, 24, 32]
-    enc_size = _alg_size[enc.name]
-    valid_sizes.remove(enc_size)
-    for v in valid_sizes:
-        k = os.urandom(v)
-        with pytest.raises(ValueError):
-            JWE(JWE.Algorithm.DIR, encryption=enc, key=k)
+
     #
     # test encrypt and decrypt with and without compression
-    ek = JWE(JWE.Algorithm.DIR, encryption=enc)
+    ek2 = JWE(JWE.Algorithm.DIR, key=os.urandom(JWE._alg_size[enc.value]))
 
     data = b'some data to be encrypted and decrypted'
-    data_enc = ek.encrypt(data, compress=False)
-    data_enc_comp = ek.encrypt(data, compress=True)
+    data_enc = ek2.encrypt(data, enc, compress=False)
+    data_enc_comp = ek2.encrypt(data, enc, compress=True)
 
     assert data_enc != data_enc_comp
-    assert data == ek.decrypt(data_enc)
-    assert data == ek.decrypt(data_enc_comp)
+    assert data == ek2.decrypt(data_enc)
+    assert data == ek2.decrypt(data_enc_comp)
 
 
 @pytest.mark.parametrize(
@@ -123,62 +91,7 @@ def test_dir_ops(enc):
 )
 def test_kw_ops(enc):
     ek = JWE()
-
-
-@pytest.mark.parametrize(
-    "alg",
-    [JWE.Algorithm.ECDH_ES, JWE.Algorithm.ECDH_ES_A128KW,
-     JWE.Algorithm.ECDH_ES_A192KW, JWE.Algorithm.ECDH_ES_A256KW]
-)
-def test_ecdh_1(alg):
-    k1 = JWE(algorithm=alg)
-
-    k2 = JWE(algorithm=alg)
-
-    data = b'some data to be encrpyted and decrypted'
-
-    with pytest.raises(RuntimeError):
-        k1.encrypt(data)
-
-    u_params = k1.party_u_generate('Alice')
-
-    with pytest.raises(RuntimeError):
-        k1.encrypt(data)
-
-    v_params = k2.party_v_import(u_params, 'Bob')
-
-    data_enc = k2.encrypt(data)
-
-    assert k1.decrypt(data_enc) == data
-
-
-@pytest.mark.parametrize(
-    "alg",
-    [JWE.Algorithm.ECDH_ES, JWE.Algorithm.ECDH_ES_A128KW,
-     JWE.Algorithm.ECDH_ES_A192KW, JWE.Algorithm.ECDH_ES_A256KW]
-)
-def test_ecdh_2(alg):
-    k1 = JWE(algorithm=alg)
-
-    k2 = JWE(algorithm=alg)
-
-    data = b'some data to be encrpyted and decrypted'
-
-    with pytest.raises(RuntimeError):
-        k1.encrypt(data)
-
-    u_params = k1.party_u_generate('Alice')
-
-    with pytest.raises(RuntimeError):
-        k1.encrypt(data)
-
-    uv_params = k2.party_v_import(u_params, 'Bob')
-
-    k1.party_u_import(uv_params)
-
-    data_enc = k1.encrypt(data, compress=True, extra_header={'cty': 'binary'})
-
-    assert k2.decrypt(data_enc) == data
+    assert ek
 
 
 def test_pbe():
@@ -189,7 +102,7 @@ def test_pbe():
             passphrase = conv.bytes_to_b64(os.urandom(random.randint(30, 100)))
             passphrase = None if random.choice((True, False)) else passphrase
 
-            jwe = JWE(algorithm=alg, encryption=enc, key=passphrase)
+            jwe = JWE(algorithm=alg, key=passphrase)
 
             jwe2 = JWE.from_jwk(jwe.to_jwk())
 
@@ -197,7 +110,7 @@ def test_pbe():
 
             data = conv.bytes_to_b64(os.urandom(random.randint(100, 500))).encode()
 
-            token = jwe.encrypt(data)
+            token = jwe.encrypt(data, enc)
 
             head = JWE.decode_header(token)
 
@@ -213,24 +126,22 @@ def test_pbe():
 
 @pytest.mark.parametrize(
     "alg",
-    [a for a in list(JWE.Algorithm) if 'ECDH' not in a.value
-     and 'RSA' not in a.value and 'dir' not in a.value]
+    [a for a in list(JWE.Algorithm) if 'RSA' not in a.value and 'dir' not in a.value]
 )
 def test_key_wrappers(alg):
     for enc in list(JWE.Encryption):
-        key = os.urandom(_alg_size[alg.value])
+        key = os.urandom(JWE._alg_size[alg.value])
 
-        jwe = JWE(algorithm=alg, encryption=enc, key=key)
+        jwe = JWE(algorithm=alg, key=key)
 
         jwk = jwe.to_jwk()
 
         assert key == conv.bytes_from_b64(jwk['k'])
         assert alg.value == jwk['alg']
-        assert enc.value == jwk['enc']
 
         data = conv.bytes_to_b64(os.urandom(random.randint(100, 500))).encode()
 
-        token = jwe.encrypt(data)
+        token = jwe.encrypt(data, enc=enc)
 
         head = JWE.decode_header(token)
 
@@ -238,3 +149,28 @@ def test_key_wrappers(alg):
         assert head['enc'] == enc.value
 
         assert data == jwe.decrypt(token)
+
+
+@pytest.mark.parametrize(
+    "alg",
+    [a for a in list(JWE.Algorithm) if 'RSA' in a.value]
+)
+def test_rsa_keys(alg):
+    k1 = JWE(algorithm=alg)
+
+    k2 = JWE(alg, key=k1.privkey)
+
+    assert k1.to_pem() == k2.to_pem()
+
+    assert alg.value == k1.alg_name
+
+    data = conv.bytes_to_b64(os.urandom(random.randint(100, 500))).encode()
+
+    for enc in list(JWE.Encryption):
+        token = k1.encrypt(data, enc=enc)
+        head = JWE.decode_header(token)
+
+        assert head['alg'] == alg.value
+        assert head['enc'] == enc.value
+
+        assert data == k1.decrypt(token)

@@ -18,15 +18,9 @@ import json
 
 import os
 
-jwe_excludes = [
-    JWE.Algorithm.ECDH_ES,
-    JWE.Algorithm.ECDH_ES_A256KW,
-    JWE.Algorithm.ECDH_ES_A192KW,
-    JWE.Algorithm.ECDH_ES_A128KW
-]
 
 sig_alg = list(JWS.Algorithm)
-enc_alg = [alg for alg in list(JWE.Algorithm) if alg not in jwe_excludes]
+enc_alg = [alg for alg in list(JWE.Algorithm)]
 
 
 @pytest.fixture(scope="session")
