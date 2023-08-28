@@ -1,12 +1,13 @@
 import webcrypt.keys as wk
 
 import pytest
+import os
 from math import nan
 
 
 @pytest.mark.parametrize(
     "key",
-    [None, 1025, "128", 1024.0, 3j + 4, b'256', nan, 0, int(), int]
+    [None, 1025, "128", 1024.0, 3j + 4, b'256', nan, 0, int(), int, float]
 )
 def test_aes_genkey(key):
     with pytest.raises(Exception):
@@ -64,3 +65,66 @@ def test_encrypt_decrypt(auth_data):
     with pytest.raises(Exception):
         k.decrypt(enc, auth_data=b'incorrect auth data')
 
+
+@pytest.mark.parametrize(
+    "auth_data",
+    [None, b'', b'Some Random Auth data string']
+)
+@pytest.mark.parametrize(
+    "keysize",
+    [16, 24, 32],
+)
+def test_gcm_encrypt_decrypt(auth_data, keysize):
+    data = b"""
+    Python's convenience has made it the most popular language for machine learning
+    and artificial intelligence. Python's flexibility has allowed Anyscale to make
+    ML/AI scalable from laptops to clusters.
+    """
+
+    key_correct = os.urandom(keysize)
+
+    key_wrong = os.urandom(keysize)
+
+    enc = wk.encrypt_gcm(key_correct, data, auth_data=auth_data)
+
+    dec = wk.decrypt_gcm(key_correct, enc, auth_data=auth_data)
+
+    assert data == dec
+
+    with pytest.raises(Exception):
+        wk.decrypt_gcm(key_wrong, enc, auth_data=auth_data)
+
+    with pytest.raises(Exception):
+        wk.decrypt_gcm(key_correct, enc, auth_data=b'incorrect auth data')
+
+
+@pytest.mark.parametrize(
+    "auth_data",
+    [None, b'', b'Some Random Auth data string']
+)
+@pytest.mark.parametrize(
+    "keysize",
+    [32, 48, 64],
+)
+def test_cbc_encrypt_decrypt(auth_data, keysize):
+    data = b"""
+    Python's convenience has made it the most popular language for machine learning
+    and artificial intelligence. Python's flexibility has allowed Anyscale to make
+    ML/AI scalable from laptops to clusters.
+    """
+
+    key_correct = os.urandom(keysize)
+
+    key_wrong = os.urandom(keysize)
+
+    enc = wk.encrypt_cbc(key_correct, data, auth_data=auth_data)
+
+    dec = wk.decrypt_cbc(key_correct, enc, auth_data=auth_data)
+
+    assert data == dec
+
+    with pytest.raises(Exception):
+        wk.decrypt_cbc(key_wrong, enc, auth_data=auth_data)
+
+    with pytest.raises(Exception):
+        wk.decrypt_cbc(key_correct, enc, auth_data=b'incorrect auth data')
