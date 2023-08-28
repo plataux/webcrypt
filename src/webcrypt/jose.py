@@ -489,12 +489,13 @@ class JOSE:
         return jwk.sign(payload=conv.doc_to_bytes(token.dict(exclude_none=True)),
                         extra_header=extra_header)
 
-    def verify(self, token: str, TokenClass: Union[Type[T], Type[Token]] = Token,
-               access_token: Optional[str] = None) -> Union[T, Token]:
+    def verify(self, token: str, TokenClass: Type[T] | Type[Token] = Token,
+               access_token: Optional[str] = None, verify_access_token: bool = True) -> T | Token:
         """
         Verify the signature, Decode the payload, and validate and deserialize it with the given,
         or the default ``Token`` Pydantic Model
 
+        :param verify_access_token: if True, will verify the at_hash claim against the access_token
         :param token: Encoded Token str in the format ``b64head.b64payload.b64sig``
         :param TokenClass: Pydantic Model to Deserialize and Validate the token Payload
         :param access_token: must be provided to calculate and validate at_hash claim, if present
@@ -523,6 +524,9 @@ class JOSE:
         :raises NotYetValid: if token is not valid yet with respect to the specific nbf timestamp
         """
 
+        if not issubclass(TokenClass, Token):
+            raise ValueError("TokenClass must be a Pydantic Model")
+
         try:
             kid = JWS.decode_header(token)['kid']
         except Exception as ex:
@@ -543,7 +547,9 @@ class JOSE:
         except Exception as ex:
             raise tex.InvalidClaims(f"invalid or missing claims from the defined schema: {ex}")
 
-        JOSE._verify_at_hash(p_token, access_token, jwk)
+        if verify_access_token:
+            JOSE._verify_at_hash(p_token, access_token, jwk)
+
         JOSE._verify_time_claims(p_token)
 
         return p_token
