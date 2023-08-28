@@ -22,18 +22,16 @@ import enum
 import random
 
 from typing import Dict, Any, Union, Optional, Tuple
-from math import ceil
 
 import os
 
-import secrets
 from random import choice
 
 from cryptography.hazmat.primitives import hashes
 
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.asymmetric.ec import SECP256R1, SECP384R1, SECP521R1
+
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric import padding
 
@@ -59,8 +57,7 @@ from pydantic import BaseModel, validator
 
 import zlib
 
-jwe_kty = Union[ec.EllipticCurvePrivateKey,
-                rsa.RSAPrivateKey, rsa.RSAPublicKey, bytes, str]
+jwe_kty = Union[ec.EllipticCurvePrivateKey, rsa.RSAPrivateKey, rsa.RSAPublicKey, bytes, str]
 
 
 class JWE_Header(BaseModel):
@@ -68,31 +65,6 @@ class JWE_Header(BaseModel):
     Pydantic Model to store, validate and serialize JWE during encryption and decryption
     operations
     """
-
-    class EPK(BaseModel):
-        """
-        Pydantic Model to Validate and Serialize epk data (Ephemeral Public Key) during
-        ECDH-ES Key agreement process.
-
-        :cvar kty: is the key type and is always set to "EC" in this case.
-
-        """
-        kty: str = "EC"
-        crv: str
-        x: str
-        y: str
-
-        @validator('crv')
-        def _val_crv(cls, crv):
-            if crv not in ('P-256', 'P-384', 'P-521'):
-                raise ValueError("Invalid EC curve for the JOSE spec")
-            return crv
-
-        @validator('kty')
-        def _val_kty(cls, kty):
-            if kty != 'EC':
-                raise ValueError(f"Invalid kty for ECDH: {kty}")
-            return kty
 
     alg: Optional[str]
     enc: Optional[str]
@@ -103,19 +75,14 @@ class JWE_Header(BaseModel):
     iv: Optional[str]
     tag: Optional[str]
 
-    apu: Optional[str]
-    apv: Optional[str]
-
     p2s: Optional[str]
     p2c: Optional[int]
 
-    epk: Optional["JWE_Header.EPK"]
-
     @validator('alg')
     def _val_alg(cls, alg):
-        if alg not in ['RSA1_5', 'RSA-OAEP', 'RSA-OAEP-256', 'dir',
+        if alg not in ['dir',
+                       'RSA1_5', 'RSA-OAEP', 'RSA-OAEP-256',
                        'A128KW', 'A192KW', 'A256KW', 'A128GCMKW', 'A192GCMKW', 'A256GCMKW',
-                       'ECDH-ES', 'ECDH-ES+A128KW', 'ECDH-ES+A192KW', 'ECDH-ES+A256KW',
                        "PBES2-HS256+A128KW", "PBES2-HS384+A192KW", "PBES2-HS512+A256KW"]:
             raise ValueError("Invalid Algorithm")
         return alg
@@ -156,14 +123,6 @@ class JWE:
         RSA_OAEP = 'RSA-OAEP'
         RSA_OAEP_256 = 'RSA-OAEP-256'
 
-        # ECDH Ephemeral Static Key Derivation between two parties
-        ECDH_ES = "ECDH-ES"
-
-        # ECDH-ES with key wrapping
-        ECDH_ES_A128KW = "ECDH-ES+A128KW"
-        ECDH_ES_A192KW = "ECDH-ES+A192KW"
-        ECDH_ES_A256KW = "ECDH-ES+A256KW"
-
     class Encryption(enum.Enum):
         A128GCM = 'A128GCM'
         A192GCM = 'A192GCM'
@@ -172,9 +131,6 @@ class JWE:
         A128CBC_HS256 = "A128CBC-HS256"
         A192CBC_HS384 = "A192CBC-HS384"
         A256CBC_HS512 = "A256CBC-HS512"
-
-    _alg_map = {v.value: v for v in list(Algorithm)}
-    _enc_map = {v.value: v for v in list(Encryption)}
 
     @staticmethod
     def gcm_encrypt(key: bytes, auth_data: bytes,
@@ -366,57 +322,6 @@ class JWE:
                 f"Could not decrypt token, corrupted or tampered with: {ex}")
 
     @staticmethod
-    def concat_kdf(
-            shared_key: bytes,
-            jwe_alg: str = 'A128GCM',
-            apu: str = 'Alice',
-            apv: str = 'Bob',
-            hash_rounds: int = 1) -> bytes:
-        """
-        Implemented following the example computation at:
-        https://datatracker.ietf.org/doc/html/rfc7518#appendix-C
-
-        :param shared_key:
-        :param jwe_alg:
-        :param apu:
-        :param apv:
-        :param hash_rounds:
-        :return:
-        """
-
-        if hash_rounds < 1:
-            raise ValueError("key derivation requires at lease one hash round")
-
-        keylen = int(JWE._alg_size[jwe_alg] * 8)
-
-        if keylen <= 256:
-            hash_alg: hashes.HashAlgorithm = hashes.SHA256()
-        elif keylen == 384:
-            hash_alg = hashes.SHA384()
-        elif keylen == 512:
-            hash_alg = hashes.SHA512()
-        else:
-            raise ValueError("unexpected keylen")
-
-        concat = []
-
-        concat += list(hash_rounds.to_bytes(4, "big"))  # round
-        concat += list(shared_key)  # shared key, also known as "Z"
-        concat += list(len(jwe_alg).to_bytes(4, "big")) + list(jwe_alg.encode())
-        concat += list(len(apu).to_bytes(4, "big")) + list(apu.encode())  # PartyUInfo
-        concat += list(len(apv).to_bytes(4, "big")) + list(apv.encode())  # PartyVInfo
-        concat += list(keylen.to_bytes(4, "big"))
-
-        current_hash = bytes(concat)
-
-        for r in range(hash_rounds):
-            hasher = hashes.Hash(hash_alg)
-            hasher.update(current_hash)
-            current_hash = hasher.finalize()
-
-        return current_hash[:(keylen // 8)]
-
-    @staticmethod
     def decode_header(token: str):
         return conv.doc_from_b64(token.split('.')[0])
 
@@ -424,7 +329,6 @@ class JWE:
     _AES_GCM_KW = ("A128GCMKW", "A192GCMKW", "A256GCMKW")
     _PBE = ("PBES2-HS256+A128KW", "PBES2-HS384+A192KW", "PBES2-HS512+A256KW")
     _RSA = ('RSA1_5', 'RSA-OAEP', 'RSA-OAEP-256')
-    _ECDH = ("ECDH-ES", "ECDH-ES+A128KW", "ECDH-ES+A192KW", "ECDH-ES+A256KW")
 
     _RSA_Padding = {
         "RSA1_5": padding.PKCS1v15(),
@@ -458,189 +362,81 @@ class JWE:
         'A256CBC-HS512': 64
     }
 
+    _enc_size = {
+        'A128GCM': 16,
+        'A192GCM': 24,
+        'A256GCM': 32,
+        'A128CBC-HS256': 32,
+        'A192CBC-HS384': 48,
+        'A256CBC-HS512': 64
+    }
+
     _pbe_hash = {
         "PBES2-HS256+A128KW": hashes.SHA256(),
         "PBES2-HS384+A192KW": hashes.SHA384(),
         "PBES2-HS512+A256KW": hashes.SHA512()
     }
 
-    _jose_curves = {
-        'secp256r1': 'P-256',
-        'secp384r1': 'P-384',
-        'secp521r1': 'P-521',
-    }
-
-    def _init_dir_alg(self, key: Union[bytes, None], jwe_alg, jwe_enc):
-
-        if key is None and jwe_enc is None:
-            key = os.urandom(16)
-            jwe_enc = JWE.Encryption.A128GCM
-
-        elif jwe_enc is not None and key is None:
-            key = os.urandom(JWE._alg_size[jwe_enc.value])
-
-        elif key is not None and jwe_enc is None:
-            raise ValueError(
-                "If a dir key is provided, an enc algorithm must explicitly be specified")
-
-        # both key and jwe_enc are provided
-        else:
-            assert key is not None
-            key_len = len(key)
-
-            if key_len not in (16, 24, 32, 48, 64):
-                raise ValueError("Invalid AES key size")
-
-            if jwe_enc is not None and JWE._alg_size[jwe_enc.value] != key_len:
-                raise ValueError("Invalid JWE Encryption with the given key size")
-
-        self._key: bytes = key
-        self._alg: JWE.Algorithm = jwe_alg
-        self._enc: JWE.Encryption = jwe_enc
-        self._kty = 'oct'
-
-    def _init_aeskw_alg(self, key: Union[bytes, None],
-                        jwe_alg: Algorithm, jwe_enc: Union[Encryption, None]):
-
-        if key is None:
-            key = os.urandom(JWE._alg_size[jwe_alg.value])
-
-        key_len = len(key)
-
-        if JWE._alg_size[jwe_alg.value] != key_len:
-            raise ValueError("AESKW Algorithm not valid with given key")
-
-        if jwe_enc is None:
-            jwe_enc = JWE.Encryption.A128GCM
-
-        self._key = key
-        self._alg = jwe_alg
-        self._enc = jwe_enc
-        self._cek_size = JWE._alg_size[jwe_enc.value]
-        self._kty = 'oct'
-
-    def _init_pbe_alg(self, key: bytes, jwe_alg: Algorithm,
-                      jwe_enc: Union[Encryption, None]):
-        if jwe_enc is None:
-            jwe_enc = JWE.Encryption.A128GCM
-
-        self._key = key
-        self._alg = jwe_alg
-        self._enc = jwe_enc
-        self._cek_size = JWE._alg_size[jwe_enc.value]
-        self._kty = 'oct'
-
-    def _init_rsa_alg(self, key: Optional[rsa.RSAPrivateKey | rsa.RSAPublicKey],
-                      jwe_alg: Algorithm, jwe_enc: Union[Encryption, None]):
-
-        if key is None:
-            key = rsa.generate_private_key(65537, 2048)
-
-        if key.key_size < 2048:
-            raise ValueError("RSA key must be 2048 bits or larger")
-
-        if isinstance(key, rsa.RSAPrivateKey):
-            self._rsa_privkey: Union[rsa.RSAPrivateKey, None] = key
-            self._rsa_pubkey = key.public_key()
-        elif isinstance(key, rsa.RSAPublicKey):
-            self._rsa_privkey = None
-            self._rsa_pubkey = key
-        else:
-            raise ValueError(f"Invalid RSA Key: {type(key)}")
-
-        if not isinstance(jwe_alg, JWE.Algorithm):
-            raise ValueError("Invalid RSA Encryption Padding Algorithm")
-
-        if jwe_enc is None:
-            jwe_enc = JWE.Encryption.A128GCM
-
-        if not isinstance(jwe_enc, JWE.Encryption):
-            raise ValueError("Invalid cek Encryption spec")
-
-        self._alg = jwe_alg
-        self._enc = jwe_enc
-        self._cek_size = JWE._alg_size[jwe_enc.value]
-        self._kty = 'RSA'
-
-    def _init_ecdh_alg(self, key: Optional[ec.EllipticCurvePrivateKey],
-                       jwe_alg: Algorithm, jwe_enc: Union[Encryption, None]):
-        if key is None:
-            key = ec.generate_private_key(ec.SECP256R1())
-
-        if not isinstance(key, ec.EllipticCurvePrivateKey):
-            raise ValueError("Invalid EC Key object")
-
-        if key.curve.name not in JWE._jose_curves:
-            raise ValueError(f"JOSE Standard doesn't include this curve: {key.curve.name}")
-
-        if jwe_enc is None:
-            jwe_enc = JWE.Encryption.A128GCM
-
-        ks = int(ceil(key.curve.key_size / 8))
-
-        self._ec_privkey = key
-        self._ec_pubkey = key.public_key()
-        pub_nums = self._ec_pubkey.public_numbers()
-
-        self._ec_x = conv.bytes_to_b64(conv.int_to_bytes(pub_nums.x, byte_size=ks))
-        self._ec_y = conv.bytes_to_b64(conv.int_to_bytes(pub_nums.y, byte_size=ks))
-        self._ec_d = conv.bytes_to_b64(conv.int_to_bytes(key.private_numbers().private_value,
-                                                         byte_size=ks))
-
-        self._alg = jwe_alg
-        self._enc = jwe_enc
-        self._kty = 'EC'
-        self._crv = JWE._jose_curves[key.curve.name]
-        self._cek_size = JWE._alg_size[jwe_enc.value]
-
-        epk = {
-            'kty': self._kty,
-            'crv': self._crv,
-            'x': self._ec_x,
-            'y': self._ec_y
-        }
-
-        self._jwe_header.epk = JWE_Header.EPK(**epk)
-
-    __slots__ = ('_key', '_alg', '_enc', '_kty', '_kid',
-                 '_cek_size', '_jwe_header',
-                 '_rsa_privkey', '_rsa_pubkey',
-                 '_crv', '_ec_privkey', '_ec_pubkey', '_ec_derkey',
-                 '_apu', '_apv', '_ec_x', '_ec_y', '_ec_d', '_party_u')
+    __slots__ = ('_key', '_alg', '_kty', '_kid',
+                 '_jwe_header',
+                 '_rsa_privkey', '_rsa_pubkey')
 
     def __init__(self,
-                 algorithm: Optional[Algorithm] = None,
-                 encryption: Optional[Encryption] = None,
-                 key: Optional[jwe_kty] = None,
-                 kid: Optional[str] = None):
+                 algorithm: Algorithm | None = None,
+                 key: jwe_kty | None = None,
+                 kid: str | None = None):
 
         if algorithm is None:
             algorithm = JWE.Algorithm.A128KW
 
-        # self._alg.value: str
-        # self._enc.value: str
-        self._ec_derkey: Union[bytes, None] = None
-        self._apu: Union[str, None] = None
-        self._apv: Union[str, None] = None
-        self._party_u: Optional[bool] = None
-
         self._jwe_header: JWE_Header = JWE_Header()
+        self._alg: JWE.Algorithm = algorithm
 
         if algorithm == JWE.Algorithm.DIR and (isinstance(key, bytes) or key is None):
-            self._init_dir_alg(key, algorithm, encryption)
+            if key is None:
+                key = os.urandom(16)
+
+            # both key and jwe_enc are provided
+            else:
+                key_len = len(key)
+
+                if key_len not in (16, 24, 32, 48, 64):
+                    raise ValueError("Invalid AES key size")
+
+            self._key: bytes = key
+            self._kty = 'oct'
 
         elif algorithm.value in JWE._AESKW + JWE._AES_GCM_KW and (
                 isinstance(key, bytes) or key is None):
-            self._init_aeskw_alg(key, algorithm, encryption)
+            if key is None:
+                key = os.urandom(JWE._alg_size[self._alg.value])
+
+            key_len = len(key)
+
+            if JWE._alg_size[self._alg.value] != key_len:
+                raise ValueError("AESKW Algorithm not valid with given key")
+
+            self._key = key
+            self._kty = 'oct'
 
         elif algorithm.value in JWE._RSA and (
                 isinstance(key, (rsa.RSAPrivateKey, rsa.RSAPublicKey)) or key is None):
-            self._init_rsa_alg(key, algorithm, encryption)
+            if key is None:
+                key = rsa.generate_private_key(65537, 2048)
 
-        elif algorithm.value in JWE._ECDH and (
-                isinstance(key, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey))
-                or key is None):
-            self._init_ecdh_alg(key, algorithm, encryption)
+            if key.key_size < 2048:
+                raise ValueError("RSA key must be 2048 bits or larger")
+
+            if isinstance(key, rsa.RSAPrivateKey):
+                self._rsa_privkey: Union[rsa.RSAPrivateKey, None] = key
+                self._rsa_pubkey = key.public_key()
+            elif isinstance(key, rsa.RSAPublicKey):
+                self._rsa_privkey = None
+                self._rsa_pubkey = key
+            else:
+                raise ValueError(f"Invalid RSA Key: {type(key)}")
+            self._key = self._rsa_privkey or self._rsa_pubkey
+            self._kty = 'RSA'
 
         elif algorithm.value in JWE._PBE and (
                 isinstance(key, (bytes, str)) or key is None):
@@ -650,7 +446,8 @@ class JWE:
                 b_key = key
             else:
                 b_key = conv.bytes_to_b64(os.urandom(32)).encode()
-            self._init_pbe_alg(b_key, algorithm, encryption)
+            self._key = b_key
+            self._kty = 'oct'
 
         else:
             raise ValueError("Unknown JWE Algorithm or invalid key type")
@@ -658,12 +455,11 @@ class JWE:
         self._kid = kid if kid is not None else str(uuid4())
 
         self._jwe_header.alg = self._alg.value
-        self._jwe_header.enc = self._enc.value
         self._jwe_header.kid = self._kid
 
     def __str__(self) -> str:
         priv_pub = "private" if self.can_decrypt else "public"
-        return f"{self.kty} | {self.alg_name} | {self.enc_name} | {self.kid} | {priv_pub}"
+        return f"{self.kty} | {self.alg_name} | {self.kid} | {priv_pub}"
 
     def __repr__(self) -> str:
         return str(self)
@@ -685,23 +481,17 @@ class JWE:
             raise ValueError(
                 f"not declare to be use for encryption/decryption purposes: {_use}")
 
-        if not all(item in jwk for item in ('kty', 'alg', 'enc')):
+        if not all(item in jwk for item in ('kty', 'alg')):
             raise ValueError("Invalid JWK format")
 
         algo_map = {_ja.value: _ja for _ja in list(JWE.Algorithm)}
-        enc_map = {_ja.value: _ja for _ja in list(JWE.Encryption)}
 
         alg_name = jwk['alg']
-        enc_name = jwk['enc']
 
         if alg_name not in algo_map:
             raise ValueError(f"Invalid JWK alg: {alg_name}")
 
-        if enc_name not in enc_map:
-            raise ValueError(f"Invalid JWK enc: {enc_name}")
-
         alg = algo_map[alg_name]
-        enc = enc_map[enc_name]
 
         kty = jwk['kty']
 
@@ -734,39 +524,16 @@ class JWE:
                     conv.int_from_b64(jwk['qi']),
                     pub_num
                 )
-                return cls(algorithm=alg, encryption=enc, key=priv_num.private_key(), kid=kid)
+                return cls(algorithm=alg, key=priv_num.private_key(), kid=kid)
             else:
-                return cls(algorithm=alg, encryption=enc, key=pub_num.public_key(), kid=kid)
+                return cls(algorithm=alg, key=pub_num.public_key(), kid=kid)
 
         elif kty == 'EC':
-            if alg_name not in JWE._ECDH:
-                raise ValueError("JWS Algorithm not compatible with this key")
-
-            if 'crv' not in jwk:
-                raise ValueError("the crv parameter is missing and is required")
-
-            _crv_to_curve = {
-                'P-256': SECP256R1(),
-                'P-384': SECP384R1(),
-                'P-521': SECP521R1(),
-            }
-
-            if (_crv := jwk['crv']) not in _crv_to_curve:
-                raise ValueError(f"invalid EC curve: {_crv}")
-
-            key_curve = _crv_to_curve[_crv]
-
-            if all(comp in jwk for comp in ('x', 'y', 'd')):
-                ec_key = ec.derive_private_key(
-                    conv.int_from_bytes(conv.bytes_from_b64(jwk['d'])),
-                    key_curve)
-                return cls(algorithm=alg, encryption=enc, key=ec_key, kid=kid)
-            else:
-                raise ValueError("Invalid EC Key in JWE keys - Must be a private key")
+            raise NotImplementedError("EC JWK not implemented yet")
 
         elif kty == 'oct':
             if 'k' in jwk:
-                return cls(algorithm=alg, encryption=enc,
+                return cls(algorithm=alg,
                            key=conv.bytes_from_b64(jwk['k']), kid=kid)
             else:
                 raise ValueError("Invalid HMAC JWK")
@@ -777,7 +544,6 @@ class JWE:
             'kid': self._kid,
             'kty': self._kty,
             'alg': self._alg.value,
-            'enc': self._enc.value,
         }
 
         if self._kty == 'RSA':
@@ -818,11 +584,7 @@ class JWE:
             jwk_dict['k'] = conv.bytes_to_b64(self._key)
 
         elif self._kty == 'EC':
-            jwk_dict['key_ops'] = ["deriveBits", "deriveKey"]
-            jwk_dict['crv'] = self._crv
-            jwk_dict['x'] = self._ec_x
-            jwk_dict['y'] = self._ec_y
-            jwk_dict['d'] = self._ec_d
+            raise NotImplementedError("EC JWK not implemented yet")
 
         return jwk_dict
 
@@ -836,7 +598,6 @@ class JWE:
             'kid': self._kid,
             'kty': self._kty,
             'alg': self._alg.value,
-            'enc': self._enc.value,
         }
 
         if self._kty == 'RSA':
@@ -849,19 +610,7 @@ class JWE:
             }
 
         if self._kty == 'EC':
-            ec_pub_num = self._ec_pubkey.public_numbers()
-
-            ks = int(ceil(self._ec_pubkey.key_size / 8))
-
-            jwk_dict = {
-                **jwk_dict,
-                "key_ops": ["deriveBits", "deriveKey"],
-                'crv': self._crv,
-                'x': conv.bytes_to_b64(conv.int_to_bytes(
-                    ec_pub_num.x, byte_size=ks)),
-                'y': conv.bytes_to_b64(conv.int_to_bytes(
-                    ec_pub_num.y, byte_size=ks)),
-            }
+            raise NotImplementedError("EC JWK not implemented yet")
 
         return jwk_dict
 
@@ -878,17 +627,13 @@ class JWE:
                     ser.Encoding.PEM,
                     ser.PublicFormat.SubjectPublicKeyInfo).decode()
         elif self._kty == 'EC':
-            if self._ec_privkey is not None:
-                return self._ec_privkey.private_bytes(
-                    ser.Encoding.PEM,
-                    ser.PrivateFormat.PKCS8,
-                    ser.NoEncryption()).decode()
+            raise NotImplementedError("EC PEM not implemented yet")
         else:
             raise RuntimeError(f"Unexpected kty: {self._kty}")
 
     @classmethod
     def from_pem(cls, key_pem: str | bytes,
-                 algorithm: Optional[Algorithm] = None, encryption: Optional[Encryption] = None,
+                 algorithm: Optional[Algorithm] = None,
                  kid=None) -> "JWE":
         if isinstance(key_pem, str):
             key_pem = key_pem.encode()
@@ -897,19 +642,19 @@ class JWE:
             priv_key = ser.load_pem_private_key(key_pem, password=None)
             if not isinstance(priv_key, (rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey)):
                 raise ValueError("Invalid Private Key")
-            return cls(algorithm, encryption, priv_key, kid)
+            return cls(algorithm, priv_key, kid)
 
         elif b'PUBLIC' in key_pem:
             pub_key = ser.load_pem_public_key(key_pem)
             if not isinstance(pub_key, rsa.RSAPublicKey):
                 raise ValueError("Invalid Public Key")
-            return cls(algorithm, encryption, pub_key, kid)
+            return cls(algorithm, pub_key, kid)
 
         elif algorithm is None or algorithm.value in [*JWE._AESKW,
                                                       *JWE._AES_GCM_KW,
                                                       *JWE._PBE,
                                                       'dir']:
-            return cls(algorithm, encryption,
+            return cls(algorithm,
                        conv.bytes_from_b64(key_pem.decode()), kid)
         else:
             raise ValueError("Invalid PEM file")
@@ -918,11 +663,6 @@ class JWE:
     def random_jwe(cls) -> "JWE":
         alg_list = list(JWE.Algorithm)
         enc_list = list(JWE.Encryption)
-
-        alg_list.remove(JWE.Algorithm.ECDH_ES)
-        alg_list.remove(JWE.Algorithm.ECDH_ES_A128KW)
-        alg_list.remove(JWE.Algorithm.ECDH_ES_A192KW)
-        alg_list.remove(JWE.Algorithm.ECDH_ES_A256KW)
 
         rand_alg: JWE.Algorithm = choice(alg_list)
         rand_enc = choice(enc_list)
@@ -945,9 +685,6 @@ class JWE:
         elif self._kty == 'RSA':
             return self._rsa_privkey or self._rsa_pubkey
 
-        elif self._kty == 'EC':
-            return self._ec_privkey
-
         else:
             raise RuntimeError("unreachable expected")
 
@@ -969,13 +706,6 @@ class JWE:
                 raise ValueError("This JWE has not private component")
 
             return self._rsa_privkey
-
-        elif self._kty == 'EC':
-            if not self._ec_privkey:
-                raise ValueError("This JWE has not private component")
-
-            return self._ec_privkey
-
         else:
             raise RuntimeError(f"Unexpected kty {self._kty}")
 
@@ -983,9 +713,6 @@ class JWE:
     def pubkey(self) -> Union[rsa.RSAPublicKey, ec.EllipticCurvePublicKey]:
         if self._kty == 'RSA':
             return self._rsa_pubkey
-
-        elif self._kty == 'EC':
-            return self._ec_pubkey
         else:
             raise RuntimeError("oct keys have no public component")
 
@@ -1002,36 +729,26 @@ class JWE:
         return self._alg.value
 
     @property
-    def enc_name(self) -> str:
-        return self._enc.value
-
-    @property
     def alg(self) -> Algorithm:
         return self._alg
 
-    @property
-    def enc(self) -> Encryption:
-        return self._enc
-
-    def encrypt(self, plaintext: bytes, compress=False,
+    def encrypt(self, plaintext: bytes, enc: Encryption = None,
+                compress=False,
                 extra_header: Optional[Dict[str, Any]] = None) -> str:
         if self._alg.value == 'dir':
-            return self._encrypt_dir(plaintext, compress, extra_header)
+            return self._encrypt_dir(plaintext, enc, compress, extra_header)
 
         elif self._alg.value in JWE._AESKW:
-            return self._encrypt_aeskw(plaintext, compress, extra_header)
+            return self._encrypt_aeskw(plaintext, enc, compress, extra_header)
 
         elif self._alg.value in JWE._AES_GCM_KW:
-            return self._encrypt_gcmkw(plaintext, compress, extra_header)
+            return self._encrypt_gcmkw(plaintext, enc, compress, extra_header)
 
         elif self._alg.value in JWE._RSA:
-            return self._encrypt_rsa(plaintext, compress, extra_header)
-
-        elif self._alg.value in JWE._ECDH:
-            return self._encrypt_ecdh(plaintext, compress, extra_header)
+            return self._encrypt_rsa(plaintext, enc, compress, extra_header)
 
         elif self._alg.value in JWE._PBE:
-            return self._encrypt_pbe(plaintext, compress, extra_header)
+            return self._encrypt_pbe(plaintext, enc, compress, extra_header)
 
         else:
             raise RuntimeError(f"unexpected enc_alg: {self._alg.value}")
@@ -1050,10 +767,6 @@ class JWE:
         if header.alg != self._alg.value:
             raise tex.AlgoMismatch(
                 "JWE alg of this token is not compatible with this JWK")
-
-        if header.enc != self._enc.value:
-            raise tex.AlgoMismatch(
-                f"Algo Encryption type mismatch: {header.enc}, {self._enc.value}")
 
         try:
             cek_wrapped = conv.bytes_from_b64(sp[1])
@@ -1076,73 +789,18 @@ class JWE:
         elif header.alg in JWE._RSA:
             return self._decrypt_rsa(header_encoded, header, cek_wrapped,
                                      iv, ciphertext, tag)
-        elif header.alg in JWE._ECDH:
-            return self._decrypt_ecdh(header_encoded, header, cek_wrapped,
-                                      iv, ciphertext, tag)
         elif header.alg in JWE._PBE:
             return self._decrypt_pbe(header_encoded, header, cek_wrapped,
                                      iv, ciphertext, tag)
         else:
             raise RuntimeError(f"unrecognized algo: {header.alg}")
 
-    def party_u_generate(self, apu: str) -> Dict[str, Any]:
-        if self._kty != 'EC':
-            raise ValueError("This is not an EC Curve key")
-
-        self._ec_derkey = None
-        self._apv = None
-        self._apu = conv.bytes_to_b64(f'{apu}:{secrets.token_urlsafe(16)}'.encode())
-        self._party_u = True
-
-        jwk_dict = {
-            'alg': self._alg.value,
-            'enc': self._enc.value,
-            'apu': self._apu,
-            'epk': {
-                'kty': self._kty,
-                'crv': self._crv,
-                'x': self._ec_x,
-                'y': self._ec_y,
-            }
-        }
-
-        JWE_Header(**jwk_dict)  # validate
-        return jwk_dict
-
-    def party_v_import(self, ecdh_params: Dict[str, Any],
-                       apv: str, override_alg=True) -> Dict[str, Any]:
-        if self._kty != 'EC':
-            raise ValueError("This is not an EC Curve key")
-
-        px = JWE_Header(**ecdh_params)
-
-        if px.alg not in ("ECDH-ES", "ECDH-ES+A128KW", "ECDH-ES+A192KW", "ECDH-ES+A256KW"):
-            raise ValueError("Invalid ECDH-ES Algorithm")
-
-        px.apv = conv.bytes_to_b64(f'{apv}:{secrets.token_urlsafe(16)}'.encode())
-
-        self._derive_ecdh_key(px, override_alg)
-
-        self._party_u = False
-        self._apu = px.apu
-        self._apv = px.apv
-
-        px.epk = self._jwe_header.epk
-        return px.dict(exclude_none=True)
-
-    def party_u_import(self, ecdh_params: Dict[str, Any]):
-        px = JWE_Header(**ecdh_params)
-
-        if px.alg not in ("ECDH-ES", "ECDH-ES+A128KW", "ECDH-ES+A192KW", "ECDH-ES+A256KW"):
-            raise ValueError("Invalid ECDH-ES Algorithm")
-
-        self._derive_ecdh_key(px, False)
-        self._apv = px.apv
-
-    def _encrypt_common(self, header, cek, cek_wrapped, compress,
+    @staticmethod
+    def _encrypt_common(header: JWE_Header,
+                        enc: JWE.Encryption, cek, cek_wrapped, compress,
                         plaintext, extra_header) -> str:
         header.zip = 'DEF' if compress else None
-
+        header.enc = enc.value
         if compress:
             ziptext = zlib.compress(plaintext)
         else:
@@ -1156,21 +814,20 @@ class JWE:
 
         header_b64 = conv.doc_to_b64(hx)
 
-        if 'CBC' in self._enc.value:
+        if 'CBC' in enc.value:
             iv, ciphertext, tag = JWE.cbc_encrypt(cek, header_b64.encode(), ziptext)
-        elif 'GCM' in self._enc.value:
+        elif 'GCM' in enc.value:
             iv, ciphertext, tag = JWE.gcm_encrypt(cek, header_b64.encode(), ziptext)
         else:
-            raise RuntimeError(f"Unexpected Encryption algorithm: {self._enc.value}")
+            raise RuntimeError(f"Unexpected Encryption algorithm")
 
         jwt = f'{header_b64}.{conv.bytes_to_b64(cek_wrapped)}.{conv.bytes_to_b64(iv)}.' \
               f'{conv.bytes_to_b64(ciphertext)}.{conv.bytes_to_b64(tag)}'
 
         return jwt
 
-    def _decrypt_common(self, header, cek, header_enc, iv, ciphertext, tag) -> bytes:
-        assert header.enc == self._enc.value
-
+    @staticmethod
+    def _decrypt_common(header, cek, header_enc, iv, ciphertext, tag) -> bytes:
         if 'GCM' in header.enc:
             plaintext = JWE.gcm_decrypt(cek, header_enc.encode(), iv, ciphertext, tag)
         elif 'CBC' in header.enc:
@@ -1178,18 +835,35 @@ class JWE:
         else:
             raise RuntimeError(f"Unexpected Encryption algorithm: {header.enc}")
 
-        if header.zip is not None:
+        if header.zip:
             plaintext = zlib.decompress(plaintext)
 
         return plaintext
 
-    def _encrypt_dir(self, plaintext: bytes, compress=True,
+    def _encrypt_dir(self, plaintext: bytes, enc: Encryption | None,
+                     compress=True,
                      extra_header: Optional[Dict[str, Any]] = None) -> str:
 
         cek = self._key
+
+        # if no enc is provided, pick one based on the key size
+        if not enc:
+            for k, v in JWE._enc_size.items():
+                if len(cek) == v:
+                    enc = JWE.Encryption(k)
+                    break
+        else:
+            # make sure the key size is compatible with the enc
+            if len(cek) != JWE._alg_size[enc.value]:
+                raise ValueError(f"Invalid key size for {enc.value}")
+
         cek_wrapped = b''
         header = self._jwe_header.copy()
-        jwt = self._encrypt_common(header, cek, cek_wrapped, compress, plaintext, extra_header)
+        jwt = self._encrypt_common(header=header,
+                                   enc=enc, cek=cek, cek_wrapped=cek_wrapped,
+                                   compress=compress,
+                                   plaintext=plaintext,
+                                   extra_header=extra_header)
 
         return jwt
 
@@ -1197,30 +871,36 @@ class JWE:
         cek = self._key
         return self._decrypt_common(header, cek, header_enc, iv, ciphertext, tag)
 
-    def _encrypt_aeskw(self, plaintext: bytes, compress=True,
+    def _encrypt_aeskw(self, plaintext: bytes, enc: Encryption | None,
+                       compress=True,
                        extra_header: Optional[Dict[str, Any]] = None) -> str:
 
-        cek = os.urandom(self._cek_size)
+        if not enc: enc = JWE.Encryption.A256GCM
+
+        cek = os.urandom(JWE._alg_size[enc.value])
         cek_wrapped = aes_key_wrap(self._key, cek)
 
         header = self._jwe_header.copy()
-        jwt = self._encrypt_common(header, cek, cek_wrapped, compress, plaintext, extra_header)
+        jwt = self._encrypt_common(header, enc, cek, cek_wrapped, compress, plaintext, extra_header)
         return jwt
 
     def _decrypt_aeskw(self, header_enc, header, cek_wrapped, iv, ciphertext, tag) -> bytes:
         cek = aes_key_unwrap(self._key, cek_wrapped)
         return self._decrypt_common(header, cek, header_enc, iv, ciphertext, tag)
 
-    def _encrypt_gcmkw(self, plaintext: bytes, compress=True,
+    def _encrypt_gcmkw(self, plaintext: bytes, enc: Encryption | None,
+                       compress=True,
                        extra_header: Optional[Dict[str, Any]] = None) -> str:
 
-        cek = os.urandom(self._cek_size)
+        if not enc: enc = JWE.Encryption.A256GCM
+
+        cek = os.urandom(JWE._alg_size[enc.value])
         cek_iv, cek_wrapped, cek_tag = JWE.gcm_encrypt(self._key, b'', cek)
 
         header: JWE_Header = self._jwe_header.copy()
         header.iv, header.tag = conv.bytes_to_b64(cek_iv), conv.bytes_to_b64(cek_tag)
 
-        jwt = self._encrypt_common(header, cek, cek_wrapped, compress, plaintext, extra_header)
+        jwt = self._encrypt_common(header, enc, cek, cek_wrapped, compress, plaintext, extra_header)
 
         return jwt
 
@@ -1236,8 +916,10 @@ class JWE:
 
         return self._decrypt_common(header, cek, header_enc, iv, ciphertext, tag)
 
-    def _encrypt_pbe(self, plaintext: bytes, compress=True,
+    def _encrypt_pbe(self, plaintext: bytes, enc: Encryption | None, compress=True,
                      extra_header: Optional[Dict[str, Any]] = None) -> str:
+
+        if not enc: enc = JWE.Encryption.A256GCM
 
         salt = os.urandom(16)
         count = random.randint(1024, 4096)
@@ -1250,14 +932,14 @@ class JWE:
                          salt=salt_val)
         wrapper = kdf.derive(key_material=self._key)
 
-        cek = os.urandom(self._cek_size)
+        cek = os.urandom(JWE._alg_size[enc.value])
         cek_wrapped = aes_key_wrap(wrapper, cek)
 
         header = self._jwe_header.copy()
         header.p2c = count
         header.p2s = conv.bytes_to_b64(salt)
 
-        jwt = self._encrypt_common(header, cek, cek_wrapped, compress, plaintext, extra_header)
+        jwt = self._encrypt_common(header, enc, cek, cek_wrapped, compress, plaintext, extra_header)
 
         return jwt
 
@@ -1287,16 +969,18 @@ class JWE:
 
         return self._decrypt_common(header, cek, header_enc, iv, ciphertext, tag)
 
-    def _encrypt_rsa(self, plaintext: bytes, compress=True,
+    def _encrypt_rsa(self, plaintext: bytes, enc: Encryption | None, compress=True,
                      extra_header: Optional[Dict[str, Any]] = None) -> str:
 
-        cek = os.urandom(self._cek_size)
+        if not enc: enc = JWE.Encryption.A256GCM
+
+        cek = os.urandom(JWE._alg_size[enc.value])
         cek_wrapped = self._rsa_pubkey.encrypt(
             cek,
             JWE._RSA_Padding[self._alg.value]
         )
         header = self._jwe_header.copy()
-        jwt = self._encrypt_common(header, cek, cek_wrapped, compress, plaintext, extra_header)
+        jwt = self._encrypt_common(header, enc, cek, cek_wrapped, compress, plaintext, extra_header)
 
         return jwt
 
@@ -1310,101 +994,3 @@ class JWE:
             JWE._RSA_Padding[self._alg.value]
         )
         return self._decrypt_common(header, cek, header_enc, iv, ciphertext, tag)
-
-    def _encrypt_ecdh(self, plaintext: bytes, compress=True,
-                      extra_header: Optional[Dict[str, Any]] = None) -> str:
-
-        if None in (self._ec_derkey, self._apu, self._apv, self._party_u):
-            raise RuntimeError("ECDH-ES Key derivation hasn't happened yet")
-
-        assert self._ec_derkey is not None
-
-        if self._alg.value == 'ECDH-ES':
-            cek = self._ec_derkey
-            cek_wrapped = b''
-        else:
-            cek = os.urandom(self._cek_size)
-            cek_wrapped = aes_key_wrap(self._ec_derkey, cek)
-
-        header: JWE_Header = self._jwe_header.copy()
-        header.apu = self._apu
-        header.apv = self._apv
-
-        jwt = self._encrypt_common(header, cek, cek_wrapped, compress, plaintext, extra_header)
-
-        return jwt
-
-    def _decrypt_ecdh(self, header_enc, header: JWE_Header,
-                      cek_wrapped, iv, ciphertext, tag) -> bytes:
-
-        if self._party_u is None:
-            raise RuntimeError("No key exchange/derivation happened yet")
-
-        if self._party_u and self._apu != header.apu:
-            raise tex.TokenException("Incorrect apu value received in token")
-
-        elif self._apv is not None and self._apv != header.apv:
-            raise tex.TokenException("Incorrect apu value received in token")
-
-        if self._ec_derkey is None:
-            self.party_u_import(header.dict())
-
-        kx: Any = self._ec_derkey
-
-        if self._alg.value == 'ECDH-ES':
-            cek = kx
-        else:
-            cek = aes_key_unwrap(kx, cek_wrapped)
-
-        return self._decrypt_common(header, cek, header_enc, iv, ciphertext, tag)
-
-    def _derive_ecdh_key(self, px: JWE_Header, override_alg=True):
-
-        if px.epk is None or px.apu is None or px.apv is None or px.alg is None or px.enc is None:
-            raise ValueError("missing ECDH key exchange parameters")
-
-        if self._crv != px.epk.crv:
-            raise ValueError("Incompatible curve among ECDH peers")
-
-        if override_alg:
-            self._alg = JWE._alg_map[px.alg]
-            self._enc = JWE._enc_map[px.enc]
-            self._jwe_header.alg = px.alg
-            self._jwe_header.enc = px.enc
-            self._cek_size = JWE._alg_size[self._enc.value]
-        else:
-            if px.alg != self._alg.value or px.enc != self._enc.value:
-                raise ValueError("Incompatible alg and/or enc with peer")
-
-        _jwk_crv_to_curve = {
-            'P-256': SECP256R1(),
-            'P-384': SECP384R1(),
-            'P-521': SECP521R1()
-        }
-
-        key_curve = _jwk_crv_to_curve[px.epk.crv]
-
-        x = conv.int_from_bytes(conv.bytes_from_b64(px.epk.x))
-        y = conv.int_from_bytes(conv.bytes_from_b64(px.epk.y))
-        pub_nums = ec.EllipticCurvePublicNumbers(x, y, key_curve)
-        peer_key = pub_nums.public_key()
-
-        if peer_key.curve.name != self._ec_privkey.curve.name:
-            raise ValueError("Incompatible curve among ECDH peers")
-
-        if self._alg.value == 'ECDH-ES':
-            jwe_alg = self._enc.value
-        else:
-            enc_map = {
-                "ECDH-ES+A128KW": 'A128GCM',
-                "ECDH-ES+A192KW": 'A192GCM',
-                "ECDH-ES+A256KW": 'A256GCM'
-            }
-            jwe_alg = enc_map[self._alg.value]
-
-        self._ec_derkey = JWE.concat_kdf(
-            self._ec_privkey.exchange(ec.ECDH(), peer_key),
-            jwe_alg,
-            conv.bytes_from_b64(px.apu).decode(),
-            conv.bytes_from_b64(px.apv).decode()
-        )

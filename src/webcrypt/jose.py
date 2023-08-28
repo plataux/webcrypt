@@ -369,13 +369,15 @@ class JOSE:
 
         return payload_raw
 
-    def raw_encrypt(self, data, compress=True,
+    def raw_encrypt(self, data, enc: JWE.Encryption | None = None,
+                    compress=True,
                     extra_header: Optional[Dict[str, Any]] = None,
                     kid: Optional[str] = None,
                     alg: Optional[str | JWE.Algorithm] = None) -> str:
         """
         Encrypt raw data, and optionally compress, returning an encoded JWT unicode string
 
+        :param enc:
         :param data: input data in byte string
         :param compress: Option to compress. True by default
         :param extra_header: dict of extra JWT headers
@@ -405,6 +407,7 @@ class JOSE:
             jwk = choice(self._enc_ks)
 
         return jwk.encrypt(data,
+                           enc,
                            compress=compress, extra_header=extra_header)
 
     def raw_decrypt(self, token: str) -> bytes:
@@ -545,7 +548,7 @@ class JOSE:
 
         return p_token
 
-    def encrypt(self, token: Token, compress=True,
+    def encrypt(self, token: Token, enc: JWE.Encryption | None = None, compress=True,
                 extra_header: Optional[Dict[str, Any]] = None,
                 kid: Optional[str] = None,
                 alg: Optional[str | JWE.Algorithm] = None) -> str:
@@ -571,6 +574,7 @@ class JOSE:
             jwk = choice(self._enc_ks)
 
         return jwk.encrypt(token.json(exclude_none=True).encode(),
+                           enc=enc,
                            compress=compress, extra_header=extra_header)
 
     def decrypt(self, token: str,
