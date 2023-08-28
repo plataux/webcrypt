@@ -87,7 +87,7 @@ class AES:
     """
 
     @staticmethod
-    def restore_key_bytes(key: Union[str, List[int]]) -> bytes:
+    def restore_key_bytes(key: str | List[int]) -> bytes:
         """
         Parse and restore AES bytes key from integer array, base16 string, base64 string, or
         english words form.
@@ -1001,6 +1001,9 @@ def encrypt_cbc(comp_key: bytes, plaintext: bytes, auth_data: bytes = b'') -> by
     if len(comp_key) not in (32, 48, 64):
         raise ValueError("CBC key must be in 32, 48, 64 bytes long")
 
+    if auth_data is None:
+        auth_data = b''
+
     key_len = len(comp_key) // 2
 
     hmac_key = comp_key[:key_len]
@@ -1049,6 +1052,9 @@ def decrypt_cbc(comp_key: bytes, ciphertext: bytes, auth_data: bytes = b'') -> b
     iv = ciphertext[:16]
     ct = ciphertext[16:-key_len]
     tag = ciphertext[-key_len:]
+
+    if auth_data is None:
+        auth_data = b''
 
     if len(comp_key) not in (32, 48, 64):
         raise ValueError("CBC key must be in 32, 36, 64 bytes long")
