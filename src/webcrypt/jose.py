@@ -26,7 +26,13 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any, TypeVar, Type, Union, DefaultDict
-from pydantic import BaseModel, Field
+
+import pydantic
+
+if int(pydantic.version.VERSION.split('.')[0]) == 2:
+    import pydantic.v1 as pydantic
+else:
+    pass
 
 from cryptography.hazmat.primitives.constant_time import bytes_eq
 
@@ -52,7 +58,7 @@ import webcrypt.exceptions as tex  # Token Exceptions
 T = TypeVar('T', bound='Token')
 
 
-class Token(BaseModel):
+class Token(pydantic.BaseModel):
     @staticmethod
     def ts_offset(days=0, hours=0, minutes=0, seconds=0) -> int:
         """
@@ -85,15 +91,15 @@ class Token(BaseModel):
     """
 
     # Issued At UTC Timestamp
-    iat: int = Field(default_factory=lambda: Token.ts_offset())
+    iat: int = pydantic.Field(default_factory=lambda: Token.ts_offset())
 
     # Expires UTC timestamp - 60 minutes by default
-    exp: int = Field(default_factory=lambda: Token.ts_offset(minutes=60))
+    exp: int = pydantic.Field(default_factory=lambda: Token.ts_offset(minutes=60))
 
     ###############################
     # Generic Fields
     # JWT ID: Unique token Identifier
-    jti: str = Field(default_factory=lambda: str(uuid4()))
+    jti: str = pydantic.Field(default_factory=lambda: str(uuid4()))
 
     # Valid Not Before a given timestamp
     nbf: Optional[int]

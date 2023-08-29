@@ -53,14 +53,20 @@ import webcrypt.exceptions as tex
 
 from uuid import uuid4
 
-from pydantic import BaseModel, validator
+import pydantic
+
+if int(pydantic.version.VERSION.split('.')[0]) == 2:
+    import pydantic.v1 as pydantic
+else:
+    pass
+
 
 import zlib
 
 jwe_kty = Union[ec.EllipticCurvePrivateKey, rsa.RSAPrivateKey, rsa.RSAPublicKey, bytes, str]
 
 
-class JWE_Header(BaseModel):
+class JWE_Header(pydantic.BaseModel):
     """
     Pydantic Model to store, validate and serialize JWE during encryption and decryption
     operations
@@ -78,7 +84,7 @@ class JWE_Header(BaseModel):
     p2s: Optional[str]
     p2c: Optional[int]
 
-    @validator('alg')
+    @pydantic.validator('alg')
     def _val_alg(cls, alg):
         if alg not in ['dir',
                        'RSA1_5', 'RSA-OAEP', 'RSA-OAEP-256',
@@ -87,7 +93,7 @@ class JWE_Header(BaseModel):
             raise ValueError("Invalid Algorithm")
         return alg
 
-    @validator('enc')
+    @pydantic.validator('enc')
     def _val_enc(cls, enc):
         if enc not in ('A128GCM', 'A192GCM', 'A256GCM',
                        "A128CBC-HS256", "A192CBC-HS384", "A256CBC-HS512"):
