@@ -29,7 +29,7 @@ case $1 in
   echo "update"
   ;;
 
-  test)
+test)
   pytest
   ;;
 
