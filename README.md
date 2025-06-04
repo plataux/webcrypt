@@ -13,7 +13,7 @@ This project borrows ideas from, and is inspired by other Python libraries inclu
 * ``pycryptodome``
 * ``python-jose``
 
-``pip install "git+https://github.com/plataux/webcrypt@v0.6.1"``
+``pip install webcrypt``
 
 ## Project Goals
 
