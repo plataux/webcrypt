@@ -55,6 +55,7 @@ from collections import defaultdict
 
 import webcrypt.exceptions as tex  # Token Exceptions
 
+CLOCK_SKEW_SECONDS = 60
 T = TypeVar('T', bound='Token')
 
 
@@ -697,14 +698,22 @@ class JOSE:
     def _verify_time_claims(token: Token):
         now_ts = Token.ts_offset()
 
-        if now_ts < token.iat:
-            raise tex.InvalidClaims("iat claim cannot be in the future")
+        if now_ts + CLOCK_SKEW_SECONDS < token.iat:
+            raise tex.InvalidClaims(f"iat claim cannot be in the future: {token.iat} vs {now_ts}")
 
-        if now_ts > token.exp:
-            raise tex.ExpiredSignature("Token has expired")
+        if now_ts > token.exp + CLOCK_SKEW_SECONDS:  # <-- Change is here
+            raise tex.ExpiredSignature(
+                f"Token has expired: {token.exp} vs {now_ts} "
+                f"(with {CLOCK_SKEW_SECONDS}s skew)"
+            )
 
-        if token.nbf is not None and now_ts < token.nbf:
-            raise tex.NotYetValid("Token isn't valid yet: nbf hasn't been reached")
+        if token.nbf is not None:
+            # Check if 'nbf' is in the future beyond the allowed clock skew
+            if now_ts < token.nbf - CLOCK_SKEW_SECONDS:
+                raise tex.NotYetValid(
+                    f"Token isn't valid yet: nbf {token.nbf} hasn't been reached "
+                    f"within allowed clock skew {CLOCK_SKEW_SECONDS}s (current: {now_ts})"
+                )
 
     @staticmethod
     def at_hash(access_token, jws: JWS) -> str:
