@@ -90,55 +90,90 @@ class Token(pydantic.BaseModel):
     OAuth 2.0 flows used by OpenID Connect
     """
 
-    # Issued At UTC Timestamp
-    iat: int = pydantic.Field(default_factory=lambda: Token.ts_offset())
+    iat: int = pydantic.Field(default_factory=lambda: Token.ts_offset(),
+                                description="Issued At UTC Timestamp, "
+                                            "which is a UTC timestamp of the time when the Token was issued")
 
-    # Expires UTC timestamp - 60 minutes by default
-    exp: int = pydantic.Field(default_factory=lambda: Token.ts_offset(minutes=60))
+
+    exp: int = pydantic.Field(default_factory=lambda: Token.ts_offset(minutes=60),
+                              description="Expiration UTC Timestamp, "
+                                          "which is a UTC timestamp of the time when the Token expires")
 
     ###############################
     # Generic Fields
-    # JWT ID: Unique token Identifier
-    jti: str = pydantic.Field(default_factory=lambda: str(uuid4()))
 
-    # Valid Not Before a given timestamp
-    nbf: Optional[int]
+    jti: str = pydantic.Field(default_factory=lambda: str(uuid4()),
+                              description="JWT ID, which is a unique identifier for the JWT")
+
+    nbf: Optional[int] = pydantic.Field(default=None,
+                                        description="Not Before UTC Timestamp, "
+                                                    "if not set, token is valid immediately")
 
     #############################
-    # Conditionally Binding Fields
+    # Conditionally Required Fields
 
     # https scheme that contains scheme and host, and optionally
     # port number and path components and no query or fragment components
-    iss: Optional[str]
+    iss: Optional[str] = pydantic.Field(
+        default=None,
+        description="Issuer Identifier URL, "
+                    "which is a URL that identifies the Issuer of the Token")
 
     # A locally unique and never reassigned identifier within the Issuer for the End-User
     # which is intended to be consumed by the Client
-    sub: Optional[str]
+    sub: Optional[str] = pydantic.Field(
+        default=None,
+        description="Subject Identifier, which is a locally unique and never reassigned "
+                    "identifier within the Issuer for the End-User")
 
     # It MUST contain the OAuth 2.0 client_id of the Relying Party as an audience value
-    aud: Optional[str]
+    aud: Optional[str] = pydantic.Field(
+        default=None,
+        description="Audience Identifier, which is a string or array of strings "
+                    "that identifies the recipients that the JWT is intended for")
 
     # in case access_token is provided. This is an OpenID Claim
-    at_hash: Optional[str]
+    at_hash: Optional[str] = pydantic.Field(
+        default=None,
+        description="Access Token hash, which is a hash of the Access Token, "
+                    "used to mitigate replay attacks")
 
     #####################################
 
     # authentication time UTC Timestamp
-    auth_time: Optional[int]
+    auth_time: Optional[int] = pydantic.Field(
+        default=None,
+        description="Authentication Time, which is a UTC timestamp "
+                    "of the time when the End-User was authenticated")
 
     # String value used to associate a Client session with an ID Token,
     # and to mitigate replay attacks
-    nonce: Optional[str]
+    nonce: Optional[str] = pydantic.Field(
+        default=None,
+        description="Nonce, which is a string value used to associate a Client session "
+                    "with an ID Token, and to mitigate replay attacks")
 
     # Authentication Context Class Reference
-    acr: Optional[str]
+    acr: Optional[str] = pydantic.Field(
+        default=None,
+        description="Authentication Context Class Reference, "
+                    "which is a string value that identifies the Authentication Context "
+                    "Class that the End-User was authenticated with")
 
     # Authentication Methods References
-    amr: Optional[List[str]]
+    amr: Optional[List[str]] = pydantic.Field(
+        default=None,
+        description="Authentication Methods References, "
+                    "which is an array of strings that identifies the Authentication Methods "
+                    "that were used to authenticate the End-User")
 
     #  Authorized party - the party to which the ID Token was issued.
     #  If present, it MUST contain the OAuth 2.0 Client ID of this party.
-    azp: Optional[str]
+    azp: Optional[str] = pydantic.Field(
+        default=None,
+        description="Authorized Party, which is a string value that identifies the party "
+                    "to which the ID Token was issued, and MUST contain the OAuth 2.0 Client ID "
+                    "of this party")
 
 
 class JOSE:
