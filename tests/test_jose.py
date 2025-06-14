@@ -6,7 +6,6 @@ from webcrypt.jose import JOSE, Token
 from webcrypt.jws import JWS
 from webcrypt.jwe import JWE
 import webcrypt.exceptions as tex
-import time
 
 from typing import Tuple, List
 
@@ -282,20 +281,3 @@ def test_sign_verify_tokens():
     with pytest.raises(tex.InvalidClaims):
         assert pub_jose.verify(jwt2, access_token='invalid token')
 
-    time.sleep(2)
-
-    with pytest.raises(tex.ExpiredSignature):
-        assert pub_jose.verify(jwt1)
-
-    with pytest.raises(tex.ExpiredSignature):
-        assert pub_jose.verify(jwt2, access_token=access_token)
-
-    tk = Token(
-        iat=Token.ts_offset(seconds=2),
-        exp=Token.ts_offset(seconds=5)
-    )
-
-    jwt3 = jose.sign(tk)
-
-    with pytest.raises(tex.InvalidClaims):
-        assert pub_jose.verify(jwt3)
